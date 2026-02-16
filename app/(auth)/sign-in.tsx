@@ -1,12 +1,11 @@
 import { useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { Link } from 'expo-router';
 import { useAuth } from '../../src/auth/useAuth';
 import { BrandMark } from '../../src/components/BrandMark';
 import { Colors } from '../../src/theme/colors';
 
 export default function SignInScreen() {
-  const router = useRouter();
   const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -18,9 +17,8 @@ export default function SignInScreen() {
     setBusy(true);
     try {
       await signIn(email.trim(), password);
-      router.replace('/(tabs)');
     } catch (e: any) {
-      setError(e?.message ?? 'Login failed');
+      setError(e?.message ?? 'An unknown error has occurred while signing in.');
     } finally {
       setBusy(false);
     }

@@ -1,17 +1,14 @@
 import "react-native-get-random-values";
 import { Stack } from "expo-router";
 import { useEffect } from "react";
-import { configureAmplify } from "../src/lib/amplify";
-import { AuthProvider } from "../src/auth/AuthProvider";
+import { configureAmplify, logAmplifyStatus } from "../src/lib/amplify";
+
+configureAmplify();
 
 export default function RootLayout() {
   useEffect(() => {
-    configureAmplify();
+    void logAmplifyStatus();
   }, []);
 
-  return (
-    <AuthProvider>
-      <Stack screenOptions={{ headerShown: false }} />
-    </AuthProvider>
-  );
+  return <Stack screenOptions={{ headerShown: false }} />;
 }
