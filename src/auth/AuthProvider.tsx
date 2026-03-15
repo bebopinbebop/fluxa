@@ -1,135 +1,171 @@
-import { createContext, useEffect, useMemo, useState } from 'react';
-import { View, ActivityIndicator } from 'react-native';
-import { getCurrentUser, signIn as amplifySignIn, signOut as amplifySignOut } from 'aws-amplify/auth';
+import { createContext, useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, View } from 'react-native';
+import {
+  confirmSignUp as amplifyConfirmSignUp,
+  getCurrentUser,
+  signIn as amplifySignIn,
+  signOut as amplifySignOut,
+  signUp as amplifySignUp,
+} from 'aws-amplify/auth';
 import { Hub } from 'aws-amplify/utils';
 import { useRouter, useSegments } from 'expo-router';
+import { createMyProfile, getMyProfile, type CreateMyProfileInput, type UserProfile } from '../lib/profile';
+
+type SignUpInput = {
+  email: string;
+  password: string;
+};
+
+type ConfirmSignUpInput = {
+  email: string;
+  confirmationCode: string;
+};
+
+type AuthUser = Awaited<ReturnType<typeof getCurrentUser>>;
 
 type AuthCtx = {
-  user: any | null;
+  user: AuthUser | null;
+  profile: UserProfile | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string) => Promise<void>;
+  signUp: (input: SignUpInput) => Promise<void>;
+  confirmSignUp: (input: ConfirmSignUpInput) => Promise<void>;
   signOut: () => Promise<void>;
+  refreshProfile: () => Promise<UserProfile | null>;
+  completeOnboarding: (input: CreateMyProfileInput) => Promise<UserProfile | null>;
 };
 
 export const AuthContext = createContext<AuthCtx | null>(null);
 
-function mapSignInError(error: unknown) {
-  const e = error as { name?: string; message?: string };
-  const name = e?.name ?? '';
-  const message = e?.message ?? '';
-
-  if (name === 'NotAuthorizedException') return 'Incorrect email or password.';
-  if (name === 'UserNotConfirmedException') return 'User is not confirmed. Check your email for the confirmation code.';
-  if (name === 'UserNotFoundException') return 'No user found for this email.';
-  if (name === 'NetworkError') return 'Network error while signing in. Check your connection and try again.';
-  if (message) return message;
-  return 'An unknown error has occurred while signing in.';
-}
-
-function getErrorDetails(error: unknown) {
-  const e = error as {
-    name?: string;
-    message?: string;
-    code?: string;
-    recoverySuggestion?: string;
-    underlyingError?: { name?: string; message?: string; code?: string };
-  };
-
-  return {
-    name: e?.name ?? null,
-    code: e?.code ?? null,
-    message: e?.message ?? null,
-    recoverySuggestion: e?.recoverySuggestion ?? null,
-    underlyingName: e?.underlyingError?.name ?? null,
-    underlyingCode: e?.underlyingError?.code ?? null,
-    underlyingMessage: e?.underlyingError?.message ?? null,
-  };
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<any | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+
   const router = useRouter();
   const segments = useSegments();
 
-  async function refreshUser() {
+  const refreshProfile = useCallback(async () => {
     try {
-      const u = await getCurrentUser();
-      setUser(u);
+      const nextProfile = await getMyProfile();
+      setProfile(nextProfile);
+      return nextProfile;
+    } catch (error) {
+      console.error('[Auth] profile load failed', error);
+      setProfile(null);
+      return null;
+    }
+  }, []);
+
+  const refreshAuthState = useCallback(async () => {
+    setLoading(true);
+
+    try {
+      const currentUser = await getCurrentUser();
+      setUser(currentUser);
+      await refreshProfile();
     } catch {
       setUser(null);
+      setProfile(null);
     } finally {
       setLoading(false);
     }
-  }
+  }, [refreshProfile]);
 
   useEffect(() => {
-    refreshUser();
-    const sub = Hub.listen('auth', () => refreshUser());
-    return () => sub();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void refreshAuthState();
 
-  // Protected route logic (matches Expo Router docs)
+    const unsubscribe = Hub.listen('auth', () => {
+      void refreshAuthState();
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [refreshAuthState]);
+
   useEffect(() => {
     if (loading) return;
-    const inAuthGroup = segments[0] === '(auth)';
-    if (!user && !inAuthGroup) router.replace('/(auth)/sign-in');
-    if (user && inAuthGroup) router.replace('/(tabs)');
-  }, [user, loading, segments, router]);
+
+    const group = segments[0];
+    const inAuthGroup = group === '(auth)';
+    const inOnboardingGroup = group === '(onboarding)';
+    const inTabsGroup = group === '(tabs)';
+
+    if (!user && !inAuthGroup) {
+      router.replace('/(auth)/sign-in');
+      return;
+    }
+
+    if (user && !profile && !inOnboardingGroup) {
+      router.replace('/(onboarding)');
+      return;
+    }
+
+    if (user && profile && !inTabsGroup) {
+      router.replace('/(tabs)');
+    }
+  }, [loading, profile, router, segments, user]);
 
   const value = useMemo<AuthCtx>(
     () => ({
       user,
+      profile,
       loading,
-      signIn: async (email, password) => {
+
+      signIn: async (email: string, password: string) => {
         const username = email.trim().toLowerCase();
+
+        const result = await amplifySignIn({ username, password });
+
+        if (!result.isSignedIn) {
+          const step = result.nextStep?.signInStep;
+          throw new Error(`Extra step required: ${step ?? 'UNKNOWN_STEP'}`);
+        }
+
+        await refreshAuthState();
+      },
+
+      signUp: async ({ email, password }: SignUpInput) => {
+        const username = email.trim().toLowerCase();
+
+        await amplifySignUp({
+          username,
+          password,
+          options: {
+            userAttributes: {
+              email: username,
+            },
+          },
+        });
+      },
+
+      confirmSignUp: async ({ email, confirmationCode }: ConfirmSignUpInput) => {
+        await amplifyConfirmSignUp({
+          username: email.trim().toLowerCase(),
+          confirmationCode: confirmationCode.trim(),
+        });
+      },
+
+      signOut: async () => {
         try {
-          let result;
-          try {
-            result = await amplifySignIn({ username, password });
-          } catch (error) {
-            const details = getErrorDetails(error);
-            const shouldRetryWithPasswordFlow =
-              details.name === 'Unknown' ||
-              details.message?.toLowerCase().includes('unknown error') === true;
-
-            if (!shouldRetryWithPasswordFlow) throw error;
-
-            console.warn('[Auth] SRP signIn failed; retrying with USER_PASSWORD_AUTH', details);
-            result = await amplifySignIn({
-              username,
-              password,
-              options: { authFlowType: 'USER_PASSWORD_AUTH' },
-            });
-          }
-
-          if (!result.isSignedIn) {
-            const step = result.nextStep?.signInStep;
-            if (step === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
-              throw new Error('This user must set a new password first. Use "Forgot password" to set a new password, then sign in again.');
-            }
-            throw new Error(`Sign-in requires an additional step: ${step ?? 'UNKNOWN_STEP'}.`);
-          }
-          await refreshUser();
-        } catch (error) {
-          console.error('[Auth] signIn failed', getErrorDetails(error));
-          throw new Error(mapSignInError(error));
+          await amplifySignOut();
+        } finally {
+          setUser(null);
+          setProfile(null);
+          router.replace('/(auth)/sign-in');
         }
       },
-      signUp: async (email) => {
-        // Placeholder: wire this to `signUp` from `aws-amplify/auth`.
-        // Keeping it layout-only for now.
-        console.log('TODO: connect Amplify signUp. Email:', email);
+
+      refreshProfile,
+
+      completeOnboarding: async (input: CreateMyProfileInput) => {
+        const nextProfile = await createMyProfile(input);
+        setProfile(nextProfile);
+        return nextProfile;
       },
-      signOut: async () => {
-        await amplifySignOut();
-        setUser(null);
-        router.replace('/(auth)/sign-in');
-      }
     }),
-    [user, loading, router]
+    [loading, profile, refreshProfile, router, user]
   );
 
   if (loading) {

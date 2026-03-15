@@ -7,13 +7,15 @@ let statusLogged = false;
 
 export function configureAmplify() {
   if (configured) return;
-  Amplify.configure(outputs);
+  Amplify.configure(outputs); // this is where Amplify actually loads the ARNs and backend config data
   configured = true;
 
   const region = outputs?.auth?.aws_region ?? "unknown";
   const userPoolId = outputs?.auth?.user_pool_id ?? "unknown";
   const dataApi = outputs?.data?.url ?? "unknown";
+  // console.log("CHECKING AMPLIFY CONFIG...")
   console.log("[Amplify] Configured", { region, userPoolId, dataApi });
+  // console.log("dataAPI", {dataApi})
 }
 
 export async function logAmplifyStatus() {

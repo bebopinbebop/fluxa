@@ -6,6 +6,13 @@ export default function AuthLayout() {
       screenOptions={{
         headerShown: false
       }}
-    />
+    >
+      <Stack.Screen
+        name="sign-in"
+        options={{
+          animation: 'slide_from_left'
+        }}
+      />
+    </Stack>
   );
 }

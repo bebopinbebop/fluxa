@@ -4,6 +4,8 @@ import { TransactionRow, Transaction } from '../../src/components/TransactionRow
 import { HighlightCard } from '../../src/components/HighlightCard';
 import { AdvisorCard } from '../../src/components/AdvisorCard';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '../../src/auth/useAuth';
 
 const txns: Transaction[] = [
   { id: '1', name: 'McDonalds', date: '18-04-2024 | 10:23 AM', amount: -35.32, brand: 'mcd' },
@@ -13,17 +15,24 @@ const txns: Transaction[] = [
 
 export default function HomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { signOut } = useAuth();
 
   return (
     <FlatList
       style={{ backgroundColor: Colors.bg }}
-      contentContainerStyle={styles.container}
+      contentContainerStyle={[styles.container, { paddingTop: 20}]}
       ListHeaderComponent={
         <>
           <View style={styles.headerRow}>
-            <Text style={styles.headerText}>
-              Hello <Text style={{ color: Colors.blue }}>Francine</Text>
-            </Text>
+            <View style={styles.headerLeft}>
+              <Pressable style={styles.backButton} onPress={signOut}>
+                <Text style={styles.backButtonText}>←</Text>
+              </Pressable>
+              <Text style={styles.headerText}>
+                Hello <Text style={{ color: Colors.blue }}>Francine</Text>
+              </Text>
+            </View>
             <Text style={styles.headerText}>
               Good <Text style={{ color: Colors.blue }}>Afternoon</Text>
             </Text>
@@ -86,9 +95,21 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: 16, paddingTop: 18, paddingBottom: 20 },
+  container: { paddingHorizontal: 16, paddingBottom: 20 },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerText: { fontSize: 16, fontWeight: '600' },
+  backButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  backButtonText: { fontSize: 18, fontWeight: '700', color: Colors.blue },
   netWorthCard: {
     marginTop: 14,
     borderWidth: 1,

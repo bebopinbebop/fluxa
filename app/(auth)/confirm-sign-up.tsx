@@ -1,29 +1,24 @@
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Link, useRouter } from 'expo-router';
+import { Link } from 'expo-router';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useAuth } from '../../src/auth/useAuth';
 import { BrandMark } from '../../src/components/BrandMark';
 import { Colors } from '../../src/theme/colors';
 
-export default function SignUpScreen() {
+export default function ConfirmSignUpScreen() {
   const router = useRouter();
-  const { signUp } = useAuth();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const params = useLocalSearchParams<{ email?: string }>();
+  const initialEmail = typeof params.email === 'string' ? params.email : '';
+  const { confirmSignUp } = useAuth();
+  const [email, setEmail] = useState(initialEmail);
+  const [confirmationCode, setConfirmationCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function onCreate() {
-    const normalizedEmail = email.trim().toLowerCase();
-
-    if (!normalizedEmail || !password || !confirmPassword) {
-      setError('Enter your email and password to continue.');
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      setError('Passwords do not match.');
+  async function onConfirm() {
+    if (!email.trim() || !confirmationCode.trim()) {
+      setError('Enter your email and confirmation code.');
       return;
     }
 
@@ -31,13 +26,10 @@ export default function SignUpScreen() {
     setBusy(true);
 
     try {
-      await signUp({ email: normalizedEmail, password });
-      router.replace({
-        pathname: '/(auth)/confirm-sign-up',
-        params: { email: normalizedEmail },
-      });
+      await confirmSignUp({ email, confirmationCode });
+      router.replace('/(auth)/sign-in');
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Sign up failed.');
+      setError(e instanceof Error ? e.message : 'Confirmation failed.');
     } finally {
       setBusy(false);
     }
@@ -49,8 +41,8 @@ export default function SignUpScreen() {
         <BrandMark />
       </View>
 
-      <Text style={styles.title}>Create your account</Text>
-      <Text style={styles.subtitle}>Use your email and password to get started.</Text>
+      <Text style={styles.title}>Confirm sign up</Text>
+      <Text style={styles.subtitle}>Enter the code sent to your email.</Text>
 
       <View style={styles.form}>
         <TextInput
@@ -63,28 +55,21 @@ export default function SignUpScreen() {
           style={styles.input}
         />
         <TextInput
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-          placeholder="Password"
-          style={styles.input}
-        />
-        <TextInput
-          value={confirmPassword}
-          onChangeText={setConfirmPassword}
-          secureTextEntry
-          placeholder="Confirm password"
+          value={confirmationCode}
+          onChangeText={setConfirmationCode}
+          keyboardType="number-pad"
+          placeholder="Confirmation code"
           style={styles.input}
         />
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        <Pressable style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]} onPress={onCreate} disabled={busy}>
-          <Text style={styles.primaryBtnText}>{busy ? 'Creating account...' : 'Create account'}</Text>
+        <Pressable style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]} onPress={onConfirm} disabled={busy}>
+          <Text style={styles.primaryBtnText}>{busy ? 'Confirming...' : 'Confirm account'}</Text>
         </Pressable>
 
         <Text style={styles.bottomText}>
-          Already have an account? <Link href="/(auth)/sign-in" style={styles.link}>Sign in</Link>
+          Back to <Link href="/(auth)/sign-in" style={styles.link}>sign in</Link>
         </Text>
       </View>
     </View>

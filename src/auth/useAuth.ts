@@ -3,10 +3,14 @@ import { AuthContext } from './AuthProvider';
 
 const fallbackAuth = {
   user: null,
+  profile: null,
   loading: false,
   signIn: async () => {},
   signUp: async () => {},
-  signOut: async () => {}
+  confirmSignUp: async () => {},
+  signOut: async () => {},
+  refreshProfile: async () => null,
+  completeOnboarding: async () => null,
 };
 
 export function useAuth() {

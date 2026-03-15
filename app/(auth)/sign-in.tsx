@@ -26,7 +26,7 @@ export default function SignInScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={{ alignItems: 'center', marginTop: 50 }}>
+      <View style={{ alignItems: 'center', marginTop: 100 }}>
         <BrandMark />
       </View>
 
