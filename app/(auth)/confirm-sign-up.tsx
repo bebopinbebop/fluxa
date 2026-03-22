@@ -27,7 +27,7 @@ export default function ConfirmSignUpScreen() {
 
     try {
       await confirmSignUp({ email, confirmationCode });
-      router.replace('/(auth)/sign-in');
+      router.replace('/(onboarding)');
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Confirmation failed.');
     } finally {
@@ -42,7 +42,7 @@ export default function ConfirmSignUpScreen() {
       </View>
 
       <Text style={styles.title}>Confirm sign up</Text>
-      <Text style={styles.subtitle}>Enter the code sent to your email.</Text>
+      <Text style={styles.subtitle}>Enter the code sent to your email to continue into onboarding.</Text>
 
       <View style={styles.form}>
         <TextInput
@@ -65,7 +65,7 @@ export default function ConfirmSignUpScreen() {
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <Pressable style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]} onPress={onConfirm} disabled={busy}>
-          <Text style={styles.primaryBtnText}>{busy ? 'Confirming...' : 'Confirm account'}</Text>
+          <Text style={styles.primaryBtnText}>{busy ? 'Confirming...' : 'Confirm and continue'}</Text>
         </Pressable>
 
         <Text style={styles.bottomText}>

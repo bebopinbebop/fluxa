@@ -1,6 +1,7 @@
 import { createContext, useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import {
+  autoSignIn,
   confirmSignUp as amplifyConfirmSignUp,
   getCurrentUser,
   signIn as amplifySignIn,
@@ -9,7 +10,13 @@ import {
 } from 'aws-amplify/auth';
 import { Hub } from 'aws-amplify/utils';
 import { useRouter, useSegments } from 'expo-router';
-import { createMyProfile, getMyProfile, type CreateMyProfileInput, type UserProfile } from '../lib/profile';
+import {
+  createMyProfile,
+  deleteMyProfile,
+  getMyProfile,
+  type CreateMyProfileInput,
+  type UserProfile,
+} from '../lib/profile';
 
 type SignUpInput = {
   email: string;
@@ -31,6 +38,7 @@ type AuthCtx = {
   signUp: (input: SignUpInput) => Promise<void>;
   confirmSignUp: (input: ConfirmSignUpInput) => Promise<void>;
   signOut: () => Promise<void>;
+  cancelOnboarding: () => Promise<void>;
   refreshProfile: () => Promise<UserProfile | null>;
   completeOnboarding: (input: CreateMyProfileInput) => Promise<UserProfile | null>;
 };
@@ -136,18 +144,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             userAttributes: {
               email: username,
             },
+            autoSignIn: true,
           },
         });
       },
 
       confirmSignUp: async ({ email, confirmationCode }: ConfirmSignUpInput) => {
-        await amplifyConfirmSignUp({
+        const result = await amplifyConfirmSignUp({
           username: email.trim().toLowerCase(),
           confirmationCode: confirmationCode.trim(),
         });
+
+        if (result.nextStep.signUpStep === 'COMPLETE_AUTO_SIGN_IN') {
+          const signInResult = await autoSignIn();
+          const step = signInResult.nextStep?.signInStep;
+
+          if (step && step !== 'DONE') {
+            throw new Error(`Extra sign-in step required: ${step}`);
+          }
+        }
+
+        await refreshAuthState();
       },
 
       signOut: async () => {
+        try {
+          await amplifySignOut();
+        } finally {
+          setUser(null);
+          setProfile(null);
+          router.replace('/(auth)/sign-in');
+        }
+      },
+
+      cancelOnboarding: async () => {
+        try {
+          await deleteMyProfile();
+        } catch (error) {
+          console.error('[Auth] onboarding cancel cleanup failed', error);
+        }
+
         try {
           await amplifySignOut();
         } finally {

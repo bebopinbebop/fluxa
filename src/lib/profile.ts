@@ -31,3 +31,17 @@ export async function createMyProfile(input: CreateMyProfileInput) {
 
   return data ?? null;
 }
+
+export async function deleteMyProfile() {
+  const { data } = await client.models.UserProfile.list();
+
+  if (!data?.[0]?.id) {
+    return;
+  }
+
+  const { errors } = await client.models.UserProfile.delete({ id: data[0].id });
+
+  if (errors?.length) {
+    throw new Error(errors[0].message);
+  }
+}

@@ -9,6 +9,7 @@ const fallbackAuth = {
   signUp: async () => {},
   confirmSignUp: async () => {},
   signOut: async () => {},
+  cancelOnboarding: async () => {},
   refreshProfile: async () => null,
   completeOnboarding: async () => null,
 };

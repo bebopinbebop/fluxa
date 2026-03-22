@@ -3,19 +3,21 @@ import { Colors } from '../../src/theme/colors';
 import { useAuth } from '../../src/auth/useAuth';
 
 export default function SettingsScreen() {
-  const { signOut } = useAuth();
+  const { profile, signOut, user } = useAuth();
+  const firstName = profile?.firstName?.trim() || 'User';
+  const email = user?.signInDetails?.loginId ?? user?.username ?? 'Unavailable';
 
   return (
     <ScrollView style={{ backgroundColor: Colors.bg }} contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Helena Hills</Text>
+      <Text style={styles.title}>{firstName}</Text>
 
       <View style={styles.avatar} />
       <Text style={styles.link}>Edit profile image</Text>
 
-      <View style={styles.row}><Text style={styles.label}>Name</Text><Text>Helena Hills</Text></View>
-      <View style={styles.row}><Text style={styles.label}>Username</Text><Text>hills_have_eyes</Text></View>
-      <View style={styles.row}><Text style={styles.label}>Email</Text><Text>hills_have_eyes@gmail.com</Text></View>
-      <View style={styles.row}><Text style={styles.label}>Phone</Text><Text>1-888-447-5594</Text></View>
+      <View style={styles.row}><Text style={styles.label}>Name</Text><Text>{firstName}</Text></View>
+      <View style={styles.row}><Text style={styles.label}>Username</Text><Text>{user?.username ?? 'Unavailable'}</Text></View>
+      <View style={styles.row}><Text style={styles.label}>Email</Text><Text>{email}</Text></View>
+      <View style={styles.row}><Text style={styles.label}>Phone</Text><Text>Unavailable</Text></View>
 
       <Text style={styles.section}>Linked Accounts</Text>
       {['Bank of America', 'Chase', 'TD Ameritrade', 'Gerber Life Insurance', 'American Express', 'Vanguard'].map((n) => (

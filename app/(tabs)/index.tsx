@@ -13,10 +13,24 @@ const txns: Transaction[] = [
   { id: '3', name: 'Walmart', date: '16-04-2024 | 11:45 AM', amount: -146.3, brand: 'walmart' }
 ];
 
+function formatCurrency(value?: number | null) {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return 'Unavailable';
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { signOut } = useAuth();
+  const { profile, signOut } = useAuth();
+  const firstName = profile?.firstName?.trim() || 'there';
+  const monthlyIncome = formatCurrency(profile?.monthlyIncome);
 
   return (
     <FlatList
@@ -30,7 +44,7 @@ export default function HomeScreen() {
                 <Text style={styles.backButtonText}>←</Text>
               </Pressable>
               <Text style={styles.headerText}>
-                Hello <Text style={{ color: Colors.blue }}>Francine</Text>
+                Hello <Text style={{ color: Colors.blue }}>{firstName}</Text>
               </Text>
             </View>
             <Text style={styles.headerText}>
@@ -39,8 +53,8 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.netWorthCard}>
-            <Text style={styles.cardLabel}>YOUR NET WORTH</Text>
-            <Text style={styles.netWorthValue}>$35,645.87</Text>
+            <Text style={styles.cardLabel}>YOUR MONTHLY INCOME</Text>
+            <Text style={styles.netWorthValue}>{monthlyIncome}</Text>
 
             <Pressable style={styles.plusBtn} onPress={() => router.push('/(tabs)/accounts/connect')}>
               <Text style={{ fontSize: 22, color: Colors.blue }}>+</Text>
@@ -80,7 +94,7 @@ export default function HomeScreen() {
       ListFooterComponent={
         <>
           <Text style={[styles.sectionTitle, { marginTop: 16 }]}>Highlights</Text>
-          <HighlightCard title="Your Average Monthly Income" value="+$9,400.00" tone="green" />
+          <HighlightCard title="Your Monthly Income" value={monthlyIncome} tone="green" />
           <AdvisorCard
             name="Jordan Schenkman"
             onChat={() => router.push('/(tabs)/chat')}

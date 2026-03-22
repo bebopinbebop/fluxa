@@ -12,7 +12,7 @@ const riskLevels = ['Conservative', 'Balanced', 'Aggressive'] as const;
 export default function OnboardingScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { completeOnboarding } = useAuth();
+  const { cancelOnboarding, completeOnboarding } = useAuth();
   const [step, setStep] = useState(1);
   const [firstName, setFirstName] = useState('');
   const [ageRange, setAgeRange] = useState('');
@@ -35,6 +35,30 @@ export default function OnboardingScreen() {
 
     setError(null);
     setStep((current) => Math.min(current + 1, 3));
+  }
+
+  function resetForm() {
+    setStep(1);
+    setFirstName('');
+    setAgeRange('');
+    setMonthlyIncome('');
+    setMonthlyExpenses('');
+    setRiskTolerance('');
+    setError(null);
+  }
+
+  async function handleCancelOnboarding() {
+    if (busy) return;
+
+    resetForm();
+    setBusy(true);
+
+    try {
+      await cancelOnboarding();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Unable to cancel onboarding.');
+      setBusy(false);
+    }
   }
 
   async function submit() {
@@ -73,6 +97,9 @@ export default function OnboardingScreen() {
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 24 }]}>
+      <Pressable style={styles.headerBackButton} onPress={handleCancelOnboarding} disabled={busy}>
+        <Text style={styles.headerBackButtonText}>←</Text>
+      </Pressable>
       <Text style={styles.eyebrow}>Onboarding</Text>
       <Text style={styles.title}>Let&apos;s set up your profile</Text>
       <Text style={styles.subtitle}>Step {step} of 3</Text>
@@ -160,6 +187,18 @@ export default function OnboardingScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.bg, paddingHorizontal: 20 },
+  headerBackButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+  headerBackButtonText: { fontSize: 20, fontWeight: '700', color: Colors.blue },
   eyebrow: { color: Colors.blue, fontSize: 13, fontWeight: '700', textTransform: 'uppercase' },
   title: { fontSize: 30, fontWeight: '700', marginTop: 10 },
   subtitle: { color: Colors.muted, marginTop: 8 },
