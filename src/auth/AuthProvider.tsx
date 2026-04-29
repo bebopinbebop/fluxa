@@ -14,6 +14,7 @@ import {
   createMyProfile,
   deleteMyProfile,
   getMyProfile,
+  syncMyProfileFinancials,
   type CreateMyProfileInput,
   type UserProfile,
 } from '../lib/profile';
@@ -56,8 +57,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshProfile = useCallback(async () => {
     try {
       const nextProfile = await getMyProfile();
-      setProfile(nextProfile);
-      return nextProfile;
+      const syncedProfile = await syncMyProfileFinancials(nextProfile);
+      setProfile(syncedProfile);
+      return syncedProfile;
     } catch (error) {
       console.error('[Auth] profile load failed', error);
       setProfile(null);
@@ -197,8 +199,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       completeOnboarding: async (input: CreateMyProfileInput) => {
         const nextProfile = await createMyProfile(input);
-        setProfile(nextProfile);
-        return nextProfile;
+        const syncedProfile = await syncMyProfileFinancials(nextProfile);
+        setProfile(syncedProfile);
+        return syncedProfile;
       },
     }),
     [loading, profile, refreshProfile, router, user]

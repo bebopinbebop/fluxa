@@ -9,6 +9,9 @@ const schema = a.schema({
       monthlyIncome: a.float(),
       monthlyExpenses: a.float(),
       riskTolerance: a.string(),
+      totalAssets: a.float(),
+      totalLiabilities: a.float(),
+      totalNetWorth: a.float(),
       onboardingComplete: a.boolean().required(),
     })
     .authorization((allow) => [allow.owner()]),

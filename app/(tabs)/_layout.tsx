@@ -14,10 +14,12 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen name="index" options={{ title: 'Home' }} />
+      <Tabs.Screen name="assets" options={{ href: null }} />
+      <Tabs.Screen name="liabilities" options={{ href: null }} />
       <Tabs.Screen name="expenses" options={{ title: 'Chart' }} />
       <Tabs.Screen name="flow" options={{ title: '$' }} />
       <Tabs.Screen name="chat" options={{ title: 'Chat' }} />
-      <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
+      <Tabs.Screen name="settings" options={{ href: null }} />
     </Tabs>
     </SafeAreaView>
   );

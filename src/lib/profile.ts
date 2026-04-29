@@ -1,5 +1,6 @@
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '../../amplify/data/resource';
+import { buildFinancialTotalsPatch } from './financials';
 
 const client = generateClient<Schema>();
 
@@ -22,6 +23,7 @@ export async function getMyProfile() {
 export async function createMyProfile(input: CreateMyProfileInput) {
   const { data, errors } = await client.models.UserProfile.create({
     ...input,
+    ...buildFinancialTotalsPatch(),
     onboardingComplete: true,
   });
 
@@ -30,6 +32,37 @@ export async function createMyProfile(input: CreateMyProfileInput) {
   }
 
   return data ?? null;
+}
+
+function numbersMatch(left?: number | null, right?: number | null) {
+  return Number((left ?? 0).toFixed(2)) === Number((right ?? 0).toFixed(2));
+}
+
+export async function syncMyProfileFinancials(profile: UserProfile | null) {
+  if (!profile?.id) {
+    return profile;
+  }
+
+  const patch = buildFinancialTotalsPatch();
+  const needsUpdate =
+    !numbersMatch(profile.totalAssets, patch.totalAssets) ||
+    !numbersMatch(profile.totalLiabilities, patch.totalLiabilities) ||
+    !numbersMatch(profile.totalNetWorth, patch.totalNetWorth);
+
+  if (!needsUpdate) {
+    return profile;
+  }
+
+  const { data, errors } = await client.models.UserProfile.update({
+    id: profile.id,
+    ...patch,
+  });
+
+  if (errors?.length) {
+    throw new Error(errors[0].message);
+  }
+
+  return data ?? { ...profile, ...patch };
 }
 
 export async function deleteMyProfile() {
