@@ -1,50 +1,7 @@
-const rawBaseUrl = process.env.EXPO_PUBLIC_PLAID_API_BASE_URL ?? "";
-const defaultBearerToken = process.env.EXPO_PUBLIC_PLAID_BEARER_TOKEN ?? "";
+import { generateClient } from 'aws-amplify/data';
+import type { Schema } from '../../amplify/data/resource';
 
-function getBaseUrl() {
-  return rawBaseUrl.replace(/\/+$/, "");
-}
-
-function buildHeaders(bearerToken?: string) {
-  const token = (bearerToken ?? defaultBearerToken).trim();
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-}
-
-async function parseError(response: Response) {
-  const text = await response.text();
-  if (!text) return `${response.status} ${response.statusText}`;
-  return `${response.status} ${response.statusText}: ${text}`;
-}
-
-async function request<T>(path: string, init: RequestInit, bearerToken?: string): Promise<T> {
-  const baseUrl = getBaseUrl();
-  if (!baseUrl) {
-    throw new Error("Missing EXPO_PUBLIC_PLAID_API_BASE_URL");
-  }
-
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    headers: {
-      ...buildHeaders(bearerToken),
-      ...(init.headers ?? {}),
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseError(response));
-  }
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  const text = await response.text();
-  if (!text) return undefined as T;
-  return JSON.parse(text) as T;
-}
+const client = generateClient<Schema>();
 
 export type PlaidInstitution = {
   institution_id: string;
@@ -63,32 +20,47 @@ export type PlaidLinkMetadata = {
   institution: PlaidInstitution;
   link_session_id?: string;
   accounts?: PlaidAccountMetadata[];
+  sandbox_persona?: string;
 };
 
-export async function createPlaidLinkToken(bearerToken?: string) {
-  return request<{ link_token: string }>(
-    "/v1/tokens",
-    {
-      method: "GET",
-    },
-    bearerToken
-  );
+export async function createPlaidLinkToken() {
+  const { data, errors } = await client.queries.createPlaidLinkToken();
+
+  if (errors?.length) {
+    throw new Error(errors[0].message);
+  }
+
+  if (!data?.link_token) {
+    throw new Error('Plaid did not return a link token.');
+  }
+
+  return data;
 }
 
-export async function exchangePlaidPublicToken(
-  publicToken: string,
-  metadata: PlaidLinkMetadata,
-  bearerToken?: string
-) {
-  return request<void>(
-    "/v1/tokens",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        public_token: publicToken,
-        metadata,
-      }),
-    },
-    bearerToken
-  );
+export async function exchangePlaidPublicToken(publicToken: string, metadata: PlaidLinkMetadata) {
+  const { data, errors } = await client.mutations.exchangePlaidPublicToken({
+    public_token: publicToken,
+    institution_id: metadata.institution.institution_id,
+    institution_name: metadata.institution.name,
+    link_session_id: metadata.link_session_id,
+    sandbox_persona: metadata.sandbox_persona,
+  });
+
+  if (errors?.length) {
+    throw new Error(errors[0].message);
+  }
+
+  return data;
+}
+
+export async function syncPlaidTransactions(plaidItemId?: string | null) {
+  const { data, errors } = await client.mutations.syncPlaidTransactions({
+    plaid_item_id: plaidItemId,
+  });
+
+  if (errors?.length) {
+    throw new Error(errors[0].message);
+  }
+
+  return data;
 }

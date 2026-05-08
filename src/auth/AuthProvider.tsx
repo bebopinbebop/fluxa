@@ -18,6 +18,8 @@ import {
   type CreateMyProfileInput,
   type UserProfile,
 } from '../lib/profile';
+import { ensureMyTransactionsFromCloud } from '../lib/transactionStore';
+import type { Transaction } from '../types/transaction';
 
 type SignUpInput = {
   email: string;
@@ -34,13 +36,16 @@ type AuthUser = Awaited<ReturnType<typeof getCurrentUser>>;
 type AuthCtx = {
   user: AuthUser | null;
   profile: UserProfile | null;
+  transactions: Transaction[];
   loading: boolean;
+  transactionsLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (input: SignUpInput) => Promise<void>;
   confirmSignUp: (input: ConfirmSignUpInput) => Promise<void>;
   signOut: () => Promise<void>;
   cancelOnboarding: () => Promise<void>;
   refreshProfile: () => Promise<UserProfile | null>;
+  refreshTransactions: (email?: string | null) => Promise<Transaction[]>;
   completeOnboarding: (input: CreateMyProfileInput) => Promise<UserProfile | null>;
 };
 
@@ -49,7 +54,9 @@ export const AuthContext = createContext<AuthCtx | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [transactionsLoading, setTransactionsLoading] = useState(false);
 
   const router = useRouter();
   const segments = useSegments();
@@ -67,20 +74,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const refreshTransactions = useCallback(async (email?: string | null) => {
+    setTransactionsLoading(true);
+
+    try {
+      const nextTransactions = await ensureMyTransactionsFromCloud(email);
+      setTransactions(nextTransactions);
+      return nextTransactions;
+    } catch (error) {
+      console.error('[Auth] transaction load failed', error);
+      setTransactions([]);
+      return [];
+    } finally {
+      setTransactionsLoading(false);
+    }
+  }, []);
+
   const refreshAuthState = useCallback(async () => {
     setLoading(true);
 
     try {
       const currentUser = await getCurrentUser();
       setUser(currentUser);
-      await refreshProfile();
+      const nextProfile = await refreshProfile();
+
+      if (nextProfile?.email) {
+        await refreshTransactions(nextProfile.email);
+      } else {
+        setTransactions([]);
+      }
     } catch {
       setUser(null);
       setProfile(null);
+      setTransactions([]);
     } finally {
       setLoading(false);
     }
-  }, [refreshProfile]);
+  }, [refreshProfile, refreshTransactions]);
 
   useEffect(() => {
     void refreshAuthState();
@@ -121,7 +151,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () => ({
       user,
       profile,
+      transactions,
       loading,
+      transactionsLoading,
 
       signIn: async (email: string, password: string) => {
         const username = email.trim().toLowerCase();
@@ -175,7 +207,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } finally {
           setUser(null);
           setProfile(null);
-          router.replace('/(auth)/sign-in');
+          setTransactions([]);
         }
       },
 
@@ -191,20 +223,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } finally {
           setUser(null);
           setProfile(null);
-          router.replace('/(auth)/sign-in');
+          setTransactions([]);
         }
       },
 
       refreshProfile,
+      refreshTransactions,
 
       completeOnboarding: async (input: CreateMyProfileInput) => {
         const nextProfile = await createMyProfile(input);
         const syncedProfile = await syncMyProfileFinancials(nextProfile);
         setProfile(syncedProfile);
+        await refreshTransactions(syncedProfile?.email ?? input.email);
         return syncedProfile;
       },
     }),
-    [loading, profile, refreshProfile, router, user]
+    [loading, profile, refreshProfile, refreshTransactions, router, transactions, transactionsLoading, user]
   );
 
   if (loading) {

@@ -2,7 +2,6 @@ import { ReactNode, useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -15,10 +14,12 @@ type SlidingOverlayCardProps = {
   children: ReactNode;
   title: string;
   titleColor: string;
+  actionLabel?: string;
+  onActionPress?: () => void;
   topInset?: number;
   bottomInset?: number;
   sideInset?: number;
-  direction?: 'left' | 'right';
+  direction?: 'left' | 'right' | 'top' | 'bottom';
 };
 
 export function SlidingOverlayCard({
@@ -27,23 +28,26 @@ export function SlidingOverlayCard({
   children,
   title,
   titleColor,
+  actionLabel,
+  onActionPress,
   topInset = 24,
   bottomInset = 24,
   sideInset = 20,
   direction = 'left',
 }: SlidingOverlayCardProps) {
   const [mounted, setMounted] = useState(visible);
-  const initialOffset = direction === 'left' ? -420 : 420;
-  const translateX = useRef(new Animated.Value(initialOffset)).current;
+  const initialOffset = direction === 'left' || direction === 'top' ? -900 : 900;
+  const translate = useRef(new Animated.Value(initialOffset)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
+  const transform = direction === 'top' || direction === 'bottom' ? [{ translateY: translate }] : [{ translateX: translate }];
 
   useEffect(() => {
     if (visible) {
       setMounted(true);
-      translateX.setValue(initialOffset);
+      translate.setValue(initialOffset);
 
       Animated.parallel([
-        Animated.timing(translateX, {
+        Animated.timing(translate, {
           toValue: 0,
           duration: 280,
           easing: Easing.out(Easing.cubic),
@@ -61,7 +65,7 @@ export function SlidingOverlayCard({
     }
 
     Animated.parallel([
-      Animated.timing(translateX, {
+      Animated.timing(translate, {
         toValue: initialOffset,
         duration: 220,
         easing: Easing.in(Easing.cubic),
@@ -78,45 +82,52 @@ export function SlidingOverlayCard({
         setMounted(false);
       }
     });
-  }, [backdropOpacity, initialOffset, translateX, visible]);
+  }, [backdropOpacity, initialOffset, translate, visible]);
 
   if (!mounted) {
     return null;
   }
 
   return (
-    <Modal animationType="none" transparent visible={mounted} onRequestClose={onClose}>
-      <View style={styles.modalRoot}>
-        <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-        </Animated.View>
-        <Animated.View
-          style={[
-            styles.card,
-            {
-              top: topInset,
-              right: sideInset,
-              bottom: bottomInset,
-              left: sideInset,
-              transform: [{ translateX }],
-            },
-          ]}
-        >
-          <Pressable style={styles.closeButton} onPress={onClose}>
-            <Text style={styles.closeButtonText}>×</Text>
+    <View style={styles.overlayRoot} pointerEvents="box-none">
+      <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+      </Animated.View>
+      <Animated.View
+        style={[
+          styles.card,
+          {
+            top: topInset,
+            right: sideInset,
+            bottom: bottomInset,
+            left: sideInset,
+            transform,
+          },
+        ]}
+      >
+        <Pressable style={styles.closeButton} onPress={onClose}>
+          <Text style={styles.closeButtonText}>×</Text>
+        </Pressable>
+        {onActionPress ? (
+          <Pressable style={styles.actionButton} onPress={onActionPress}>
+            <Text style={styles.actionButtonText}>{actionLabel ?? '+'}</Text>
           </Pressable>
-          <View style={styles.headerRow}>
-            <Text style={[styles.title, { color: titleColor }]}>{title}</Text>
-          </View>
-          {children}
-        </Animated.View>
-      </View>
-    </Modal>
+        ) : null}
+        <View style={styles.headerRow}>
+          <Text style={[styles.title, { color: titleColor }]}>{title}</Text>
+        </View>
+        {children}
+      </Animated.View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  modalRoot: { flex: 1, justifyContent: 'center' },
+  overlayRoot: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 100,
+    elevation: 100,
+  },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(15, 23, 42, 0.22)',
@@ -142,6 +153,18 @@ const styles = StyleSheet.create({
   },
   closeButtonText: {
     fontSize: 28,
+    lineHeight: 28,
+    color: '#9CA3AF',
+    fontWeight: '500',
+  },
+  actionButton: {
+    position: 'absolute',
+    top: 16,
+    right: 18,
+    zIndex: 2,
+  },
+  actionButtonText: {
+    fontSize: 26,
     lineHeight: 28,
     color: '#9CA3AF',
     fontWeight: '500',

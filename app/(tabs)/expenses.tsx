@@ -1,17 +1,31 @@
 import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { Colors } from '../../src/theme/colors';
-import { TransactionRow, Transaction } from '../../src/components/TransactionRow';
+import { TransactionRow } from '../../src/components/TransactionRow';
 import { InsightCard } from '../../src/components/InsightCard';
-
-const txns: Transaction[] = [
-  { id: '1', name: 'McDonalds', date: '18-04-2024 | 10:23 AM', amount: -35.32, brand: 'mcd' },
-  { id: '2', name: 'Youtube', date: '18-04-2024 | 10:07 AM', amount: 121.02, brand: 'yt' },
-  { id: '3', name: 'Walmart', date: '16-04-2024 | 11:45 AM', amount: -146.3, brand: 'walmart' }
-];
+import { useAuth } from '../../src/auth/useAuth';
+import { formatCurrency } from '../../src/lib/financials';
+import {
+  detectRecurringSubscriptions,
+  getIncomeExpenseSummary,
+  getRecentTransactions,
+  getSpendingByCategory,
+  getTotalSpendingByMonth,
+  identifyHighSpendingCategories,
+} from '../../src/lib/transactions';
 
 const ranges = ['7 Day', '30 Day', '90 Day', '360 Day'] as const;
 
 export default function ExpensesScreen() {
+  const { transactions } = useAuth();
+  const recentTransactions = getRecentTransactions(transactions, 4);
+  const spendingByCategory = getSpendingByCategory(transactions);
+  const highCategories = identifyHighSpendingCategories(transactions, 1);
+  const subscriptions = detectRecurringSubscriptions(transactions);
+  const cashFlow = getIncomeExpenseSummary(transactions);
+  const aprilSpending = getTotalSpendingByMonth(transactions, '2026-04');
+  const topCategory = highCategories[0];
+  const topSubscription = subscriptions[0];
+
   return (
     <ScrollView style={{ backgroundColor: Colors.bg }} contentContainerStyle={styles.container}>
       <Text style={styles.header}>Your <Text style={{ color: Colors.blue }}>Expenses</Text></Text>
@@ -25,10 +39,17 @@ export default function ExpensesScreen() {
       </View>
 
       <View style={styles.chartCard}>
-        <Text style={{ fontWeight: '700' }}>Last 7 Days</Text>
+        <Text style={{ fontWeight: '700' }}>April spending by category</Text>
         <View style={styles.fakeChart}>
-          <View style={styles.fakeLine} />
-          <Text style={styles.chartNote}>Line chart placeholder (use victory-native or react-native-svg later)</Text>
+          {spendingByCategory.slice(0, 5).map((item) => (
+            <View key={item.category} style={styles.barRow}>
+              <Text style={styles.barLabel} numberOfLines={1}>{item.category.replaceAll('_', ' ')}</Text>
+              <View style={styles.barTrack}>
+                <View style={[styles.barFill, { width: `${Math.min(100, (item.amount / Math.max(aprilSpending, 1)) * 100)}%` }]} />
+              </View>
+              <Text style={styles.barAmount}>{formatCurrency(item.amount)}</Text>
+            </View>
+          ))}
         </View>
       </View>
 
@@ -38,15 +59,28 @@ export default function ExpensesScreen() {
       </View>
 
       <View style={{ gap: 10 }}>
-        {txns.map((t) => <TransactionRow key={t.id} txn={t} />)}
+        {recentTransactions.map((transaction) => (
+          <TransactionRow key={transaction.transaction_id} txn={transaction} />
+        ))}
       </View>
 
       <Text style={[styles.sectionTitle, { marginTop: 16 }]}>Analysis</Text>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingVertical: 10 }}>
-        <InsightCard title="Expense Categories" subtitle="$342 spent in May" tone="blue" cta="See More" />
-        <InsightCard title="Cash Flow" subtitle="+$3,724.59 net" tone="green" cta="See More" />
-        <InsightCard title="Recurring Transactions" subtitle="ADP + MTA eCash" tone="red" cta="See all" />
+        <InsightCard title="Expense Categories" subtitle={`${formatCurrency(aprilSpending)} spent in April`} tone="blue" cta="See More" />
+        <InsightCard title="Cash Flow" subtitle={`${formatCurrency(cashFlow.net)} net`} tone={cashFlow.net >= 0 ? 'green' : 'red'} cta="See More" />
+        <InsightCard
+          title="Recurring Transactions"
+          subtitle={topSubscription ? `${topSubscription.merchantName} ${formatCurrency(topSubscription.amount)}` : 'No recurring subscriptions found'}
+          tone="red"
+          cta="See all"
+        />
+        <InsightCard
+          title="High Spending"
+          subtitle={topCategory ? `${topCategory.category.replaceAll('_', ' ')} leads spending` : 'No high-spend category yet'}
+          tone="blue"
+          cta="Review"
+        />
         <InsightCard title="Make a budget" subtitle="Help yourself with a budget" tone="blue" cta="See all" />
       </ScrollView>
     </ScrollView>
@@ -62,9 +96,12 @@ const styles = StyleSheet.create({
   pillText: { fontWeight: '600', color: '#333' },
   pillTextActive: { color: '#fff' },
   chartCard: { marginTop: 14, backgroundColor: '#fff', borderWidth: 1, borderColor: Colors.border, borderRadius: 16, padding: 14 },
-  fakeChart: { height: 160, marginTop: 10, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
-  fakeLine: { position: 'absolute', width: '120%', height: 3, backgroundColor: Colors.green, transform: [{ rotate: '-10deg' }], opacity: 0.6 },
-  chartNote: { color: Colors.muted, textAlign: 'center', paddingHorizontal: 12 },
+  fakeChart: { minHeight: 160, marginTop: 10, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, justifyContent: 'center', gap: 10, padding: 12 },
+  barRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  barLabel: { width: 92, color: Colors.muted, fontSize: 11, fontWeight: '800' },
+  barTrack: { flex: 1, height: 8, borderRadius: 999, backgroundColor: '#EEF2FF', overflow: 'hidden' },
+  barFill: { height: 8, borderRadius: 999, backgroundColor: Colors.blue },
+  barAmount: { width: 76, textAlign: 'right', fontSize: 11, fontWeight: '800' },
   sectionRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 14, alignItems: 'center' },
   sectionTitle: { fontSize: 16, fontWeight: '800' },
   link: { color: Colors.muted }
