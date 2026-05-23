@@ -75,6 +75,14 @@ export async function plaidRequest<T>(path: string, body: Record<string, unknown
     throw new Error('Plaid secrets are not configured.');
   }
 
+  console.log('[PlaidFlow][PlaidRequest] request start', {
+    path,
+    plaidEnv: process.env.PLAID_ENV ?? 'sandbox',
+    bodyKeys: Object.keys(body).filter((key) => key !== 'access_token' && key !== 'public_token'),
+    hasAccessToken: Boolean(body.access_token),
+    hasPublicToken: Boolean(body.public_token),
+  });
+
   const response = await fetch(`${getPlaidBaseUrl()}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -90,8 +98,22 @@ export async function plaidRequest<T>(path: string, body: Record<string, unknown
 
   if (!response.ok) {
     const message = payload?.error_message ?? payload?.error_code ?? `${response.status} ${response.statusText}`;
+    console.log('[PlaidFlow][PlaidRequest] request failed', {
+      path,
+      status: response.status,
+      statusText: response.statusText,
+      errorCode: payload?.error_code ?? null,
+      errorType: payload?.error_type ?? null,
+      requestId: payload?.request_id ?? null,
+    });
     throw new Error(`Plaid request failed: ${message}`);
   }
+
+  console.log('[PlaidFlow][PlaidRequest] request success', {
+    path,
+    status: response.status,
+    requestId: payload?.request_id ?? null,
+  });
 
   return payload as T;
 }

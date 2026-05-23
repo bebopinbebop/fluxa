@@ -1,4 +1,5 @@
 import type { UserProfile } from './profile';
+import type { UserFinancialSnapshot } from './financialSnapshot';
 import { Colors } from '../theme/colors';
 
 export type FinancialTone = 'green' | 'red';
@@ -76,12 +77,12 @@ export function buildFinancialTotalsPatch() {
   return calculateFinancialTotals();
 }
 
-export function getProfileFinancialTotals(profile?: UserProfile | null) {
+export function getProfileFinancialTotals(profile?: UserProfile | null, snapshot?: UserFinancialSnapshot | null) {
   const defaults = calculateFinancialTotals();
 
   return {
-    totalAssets: profile?.totalAssets ?? defaults.totalAssets,
-    totalLiabilities: profile?.totalLiabilities ?? defaults.totalLiabilities,
-    totalNetWorth: profile?.totalNetWorth ?? defaults.totalNetWorth,
+    totalAssets: snapshot?.totalAssets ?? profile?.totalAssets ?? defaults.totalAssets,
+    totalLiabilities: snapshot?.totalLiabilities ?? profile?.totalLiabilities ?? defaults.totalLiabilities,
+    totalNetWorth: snapshot?.totalNetWorth ?? profile?.totalNetWorth ?? defaults.totalNetWorth,
   };
 }

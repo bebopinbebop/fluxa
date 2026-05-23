@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Colors } from '../../src/theme/colors';
 import { TransactionRow } from '../../src/components/TransactionRow';
@@ -11,9 +11,13 @@ import { SlidingOverlayScreen } from '../../src/components/SlidingOverlayScreen'
 import { FinancialSummaryCard } from '../../src/components/FinancialSummaryCard';
 import { TransactionsDetails } from '../../src/components/TransactionsDetails';
 import { ConnectAccountDetails } from '../../src/components/ConnectAccountDetails';
+import { BankDataPlaceholder } from '../../src/components/BankDataPlaceholder';
+import { ProfileAvatar } from '../../src/components/ProfileAvatar';
+import { usePullToRefresh } from '../../src/components/PullToRefresh';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/auth/useAuth';
+import { useModalNavigationLock } from '../../src/navigation/ModalNavigationLock';
 import { formatCurrency, getProfileFinancialTotals } from '../../src/lib/financials';
 import {
   detectRecurringSubscriptions,
@@ -26,22 +30,43 @@ import {
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { profile, signOut, transactions } = useAuth();
+  const { setTabNavigationLocked } = useModalNavigationLock();
+  const pullToRefresh = usePullToRefresh();
+  const { financialSnapshot, hasConnectedBank, profile, signOut, transactions } = useAuth();
   const recentTransactions = getRecentTransactions(transactions, 10);
   const cashFlow = getIncomeExpenseSummary(transactions);
   const aprilSpending = getTotalSpendingByMonth(transactions, '2026-04');
   const highCategory = identifyHighSpendingCategories(transactions, 1)[0];
   const recurringSubscriptions = detectRecurringSubscriptions(transactions);
-  const savingsRate = cashFlow.income > 0 ? ((cashFlow.net / cashFlow.income) * 100).toFixed(1) : '0.0';
-  const potentialGrowth = cashFlow.net > 0 ? Math.min(18, 4 + Number(savingsRate) / 2).toFixed(1) : '0.0';
-  const firstName = profile?.firstName?.trim() || 'there';
-  const { totalAssets, totalLiabilities, totalNetWorth } = getProfileFinancialTotals(profile);
-  const netWorthValue = formatCurrency(totalNetWorth);
+  const monthlyIncome = financialSnapshot?.monthlyIncome ?? cashFlow.income;
+  const monthlyExpenses = financialSnapshot?.monthlyExpenses ?? (aprilSpending || cashFlow.expenses);
+  const monthlyCashFlow = financialSnapshot?.monthlyCashFlow ?? cashFlow.net;
+  const savingsRate = (financialSnapshot?.savingsRate ?? (monthlyIncome > 0 ? (monthlyCashFlow / monthlyIncome) * 100 : 0)).toFixed(1);
+  const potentialGrowth = monthlyCashFlow > 0 ? Math.min(18, 4 + Number(savingsRate) / 2).toFixed(1) : '0.0';
+  const firstName = profile?.name?.trim().split(/\s+/)[0] || profile?.firstName?.trim() || 'there';
+  const profileTotals = getProfileFinancialTotals(profile, financialSnapshot);
+  const totalAssets = hasConnectedBank ? profileTotals.totalAssets : 0;
+  const totalLiabilities = hasConnectedBank ? profileTotals.totalLiabilities : 0;
+  const totalNetWorth = hasConnectedBank ? profileTotals.totalNetWorth : 0;
+  const netWorthValue = hasConnectedBank ? formatCurrency(totalNetWorth) : '--';
   const [isAssetsPanelOpen, setIsAssetsPanelOpen] = useState(false);
   const [isLiabilitiesPanelOpen, setIsLiabilitiesPanelOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isTransactionsPanelOpen, setIsTransactionsPanelOpen] = useState(false);
   const [isConnectAccountOpen, setIsConnectAccountOpen] = useState(false);
+  const isAnyOverlayOpen =
+    isAssetsPanelOpen ||
+    isLiabilitiesPanelOpen ||
+    isSettingsOpen ||
+    isTransactionsPanelOpen ||
+    isConnectAccountOpen;
+
+  useEffect(() => {
+    setTabNavigationLocked(isAnyOverlayOpen);
+
+    return () => setTabNavigationLocked(false);
+  }, [isAnyOverlayOpen, setTabNavigationLocked]);
+
   const openAssetsPanel = () => setIsAssetsPanelOpen(true);
   const closeAssetsPanel = () => setIsAssetsPanelOpen(false);
   const openLiabilitiesPanel = () => setIsLiabilitiesPanelOpen(true);
@@ -55,9 +80,15 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.screen}>
+      {pullToRefresh.indicator}
       <FlatList
         style={{ backgroundColor: Colors.bg }}
         contentContainerStyle={[styles.container, { paddingTop: 20 }]}
+        onScroll={pullToRefresh.onScroll}
+        onScrollEndDrag={pullToRefresh.onScrollEndDrag}
+        scrollEventThrottle={pullToRefresh.scrollEventThrottle}
+        bounces
+        alwaysBounceVertical
         ListHeaderComponent={
           <>
             <View style={styles.headerRow}>
@@ -71,7 +102,7 @@ export default function HomeScreen() {
               </View>
 
               <Pressable style={styles.avatarButton} onPress={openSettings}>
-                <Text style={styles.avatarEmoji}>🙂</Text>
+                <ProfileAvatar size={42} profileImageKey={profile?.profileImageKey} />
               </Pressable>
 
               <Text style={[styles.headerText, styles.headerSideRight]}>
@@ -119,9 +150,13 @@ export default function HomeScreen() {
               nestedScrollEnabled
               showsVerticalScrollIndicator={false}
             >
-              {recentTransactions.map((transaction) => (
-                <TransactionRow key={transaction.transaction_id} txn={transaction} />
-              ))}
+              {hasConnectedBank ? (
+                recentTransactions.map((transaction) => (
+                  <TransactionRow key={transaction.transaction_id} txn={transaction} />
+                ))
+              ) : (
+                <BankDataPlaceholder compact />
+              )}
             </ScrollView>
           </>
         }
@@ -130,20 +165,24 @@ export default function HomeScreen() {
         ListFooterComponent={
           <>
             <Text style={[styles.sectionTitle, { marginTop: 16 }]}>Highlights</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.highlightsCarousel}>
-              <HighlightMetric title="Monthly Income" value={formatCurrency(cashFlow.income)} tone="green" />
-              <HighlightMetric title="Monthly Expenses" value={formatCurrency(aprilSpending || cashFlow.expenses)} tone="red" />
-              <HighlightMetric title="Cash Flow" value={formatCurrency(cashFlow.net)} tone={cashFlow.net >= 0 ? 'green' : 'red'} />
-              <HighlightMetric title="Savings Rate" value={`${savingsRate}%`} tone={Number(savingsRate) >= 20 ? 'green' : 'blue'} />
-              <HighlightMetric title="Growth Potential" value={`${potentialGrowth}%`} tone={Number(potentialGrowth) > 0 ? 'green' : 'red'} />
-              <HighlightMetric
-                title="Highest Category"
-                value={highCategory ? highCategory.category.replaceAll('_', ' ') : 'None'}
-                subtitle={highCategory ? formatCurrency(highCategory.amount) : undefined}
-                tone="blue"
-              />
-              <HighlightMetric title="Subscriptions" value={`${recurringSubscriptions.length}`} subtitle="recurring detected" tone="blue" />
-            </ScrollView>
+            {hasConnectedBank ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.highlightsCarousel}>
+                <HighlightMetric title="Monthly Income" value={formatCurrency(monthlyIncome)} tone="green" />
+                <HighlightMetric title="Monthly Expenses" value={formatCurrency(monthlyExpenses)} tone="red" />
+                <HighlightMetric title="Cash Flow" value={formatCurrency(monthlyCashFlow)} tone={monthlyCashFlow >= 0 ? 'green' : 'red'} />
+                <HighlightMetric title="Savings Rate" value={`${savingsRate}%`} tone={Number(savingsRate) >= 20 ? 'green' : 'blue'} />
+                <HighlightMetric title="Growth Potential" value={`${potentialGrowth}%`} tone={Number(potentialGrowth) > 0 ? 'green' : 'red'} />
+                <HighlightMetric
+                  title="Highest Category"
+                  value={financialSnapshot?.topSpendingCategory?.replaceAll('_', ' ') ?? (highCategory ? highCategory.category.replaceAll('_', ' ') : 'None')}
+                  subtitle={formatCurrency(financialSnapshot?.topSpendingCategoryAmount ?? highCategory?.amount)}
+                  tone="blue"
+                />
+                <HighlightMetric title="Subscriptions" value={`${financialSnapshot?.recurringSubscriptionCount ?? recurringSubscriptions.length}`} subtitle="recurring detected" tone="blue" />
+              </ScrollView>
+            ) : (
+              <BankDataPlaceholder compact />
+            )}
             <AdvisorCard
               name="Jordan Schenkman"
               onChat={() => router.push('/(tabs)/chat')}
@@ -277,7 +316,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginHorizontal: 10,
   },
-  avatarEmoji: { fontSize: 22 },
   netWorthCard: {
     marginTop: 14,
     borderWidth: 1,

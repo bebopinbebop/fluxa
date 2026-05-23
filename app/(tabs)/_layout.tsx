@@ -2,12 +2,15 @@ import { Tabs } from 'expo-router';
 import { Text } from 'react-native';
 import { Colors } from '../../src/theme/colors';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ModalNavigationLockProvider, useModalNavigationLock } from '../../src/navigation/ModalNavigationLock';
 
 function TabIcon({ icon, color }: { icon: string; color: string }) {
   return <Text style={{ color, fontSize: 21 }}>{icon}</Text>;
 }
 
-export default function TabsLayout() {
+function TabsNavigator() {
+  const { isTabNavigationLocked } = useModalNavigationLock();
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#fff"}} edges={["top"]}>
     <Tabs
@@ -16,6 +19,13 @@ export default function TabsLayout() {
         tabBarActiveTintColor: Colors.blue,
         tabBarInactiveTintColor: '#777',
         
+      }}
+      screenListeners={{
+        tabPress: (event) => {
+          if (isTabNavigationLocked) {
+            event.preventDefault();
+          }
+        },
       }}
     >
       <Tabs.Screen name="index" options={{ title: 'Home', tabBarIcon: ({ color }) => <TabIcon icon="⌂" color={color} /> }} />
@@ -29,5 +39,13 @@ export default function TabsLayout() {
       <Tabs.Screen name="accounts" options={{ href: null }} />
     </Tabs>
     </SafeAreaView>
+  );
+}
+
+export default function TabsLayout() {
+  return (
+    <ModalNavigationLockProvider>
+      <TabsNavigator />
+    </ModalNavigationLockProvider>
   );
 }

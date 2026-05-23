@@ -1,5 +1,5 @@
 import { View, Text, Pressable, StyleSheet, TextInput } from 'react-native';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { confirmResetPassword, resetPassword } from 'aws-amplify/auth';
 import { Colors } from '../../src/theme/colors';
@@ -12,8 +12,14 @@ export default function ForgotPassword() {
   const [step, setStep] = useState<'request' | 'confirm'>('request');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const codeInputRef = useRef<TextInput>(null);
+  const newPasswordInputRef = useRef<TextInput>(null);
 
   async function onSendCode() {
+    if (busy) {
+      return;
+    }
+
     setBusy(true);
     setError(null);
     try {
@@ -31,6 +37,10 @@ export default function ForgotPassword() {
   }
 
   async function onConfirmReset() {
+    if (busy) {
+      return;
+    }
+
     setBusy(true);
     setError(null);
     try {
@@ -57,6 +67,8 @@ export default function ForgotPassword() {
         onChangeText={setEmail}
         keyboardType="email-address"
         autoCapitalize="none"
+        returnKeyType={step === 'request' ? 'send' : 'next'}
+        onSubmitEditing={step === 'request' ? onSendCode : () => codeInputRef.current?.focus()}
         placeholder="email@domain.com"
         style={styles.input}
       />
@@ -64,16 +76,22 @@ export default function ForgotPassword() {
       {step === 'confirm' ? (
         <>
           <TextInput
+            ref={codeInputRef}
             value={code}
             onChangeText={setCode}
             autoCapitalize="none"
+            returnKeyType="next"
+            onSubmitEditing={() => newPasswordInputRef.current?.focus()}
             placeholder="verification code"
             style={styles.input}
           />
           <TextInput
+            ref={newPasswordInputRef}
             value={newPassword}
             onChangeText={setNewPassword}
             secureTextEntry
+            returnKeyType="go"
+            onSubmitEditing={onConfirmReset}
             placeholder="new password"
             style={styles.input}
           />

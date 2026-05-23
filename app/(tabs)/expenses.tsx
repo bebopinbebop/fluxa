@@ -2,6 +2,8 @@ import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { Colors } from '../../src/theme/colors';
 import { TransactionRow } from '../../src/components/TransactionRow';
 import { InsightCard } from '../../src/components/InsightCard';
+import { BankDataPlaceholder } from '../../src/components/BankDataPlaceholder';
+import { usePullToRefresh } from '../../src/components/PullToRefresh';
 import { useAuth } from '../../src/auth/useAuth';
 import { formatCurrency } from '../../src/lib/financials';
 import {
@@ -16,7 +18,8 @@ import {
 const ranges = ['7 Day', '30 Day', '90 Day', '360 Day'] as const;
 
 export default function ExpensesScreen() {
-  const { transactions } = useAuth();
+  const pullToRefresh = usePullToRefresh();
+  const { hasConnectedBank, transactions } = useAuth();
   const recentTransactions = getRecentTransactions(transactions, 4);
   const spendingByCategory = getSpendingByCategory(transactions);
   const highCategories = identifyHighSpendingCategories(transactions, 1);
@@ -27,8 +30,18 @@ export default function ExpensesScreen() {
   const topSubscription = subscriptions[0];
 
   return (
-    <ScrollView style={{ backgroundColor: Colors.bg }} contentContainerStyle={styles.container}>
-      <Text style={styles.header}>Your <Text style={{ color: Colors.blue }}>Expenses</Text></Text>
+    <View style={styles.screen}>
+      {pullToRefresh.indicator}
+      <ScrollView
+        style={{ backgroundColor: Colors.bg }}
+        contentContainerStyle={styles.container}
+        onScroll={pullToRefresh.onScroll}
+        onScrollEndDrag={pullToRefresh.onScrollEndDrag}
+        scrollEventThrottle={pullToRefresh.scrollEventThrottle}
+        bounces
+        alwaysBounceVertical
+      >
+        <Text style={styles.header}>Your <Text style={{ color: Colors.blue }}>Expenses</Text></Text>
 
       <View style={styles.pills}>
         {ranges.map((r, i) => (
@@ -40,17 +53,23 @@ export default function ExpensesScreen() {
 
       <View style={styles.chartCard}>
         <Text style={{ fontWeight: '700' }}>April spending by category</Text>
-        <View style={styles.fakeChart}>
-          {spendingByCategory.slice(0, 5).map((item) => (
-            <View key={item.category} style={styles.barRow}>
-              <Text style={styles.barLabel} numberOfLines={1}>{item.category.replaceAll('_', ' ')}</Text>
-              <View style={styles.barTrack}>
-                <View style={[styles.barFill, { width: `${Math.min(100, (item.amount / Math.max(aprilSpending, 1)) * 100)}%` }]} />
+        {hasConnectedBank ? (
+          <View style={styles.fakeChart}>
+            {spendingByCategory.slice(0, 5).map((item) => (
+              <View key={item.category} style={styles.barRow}>
+                <Text style={styles.barLabel} numberOfLines={1}>{item.category.replaceAll('_', ' ')}</Text>
+                <View style={styles.barTrack}>
+                  <View style={[styles.barFill, { width: `${Math.min(100, (item.amount / Math.max(aprilSpending, 1)) * 100)}%` }]} />
+                </View>
+                <Text style={styles.barAmount}>{formatCurrency(item.amount)}</Text>
               </View>
-              <Text style={styles.barAmount}>{formatCurrency(item.amount)}</Text>
-            </View>
-          ))}
-        </View>
+            ))}
+          </View>
+        ) : (
+          <View style={styles.placeholderWrap}>
+            <BankDataPlaceholder compact />
+          </View>
+        )}
       </View>
 
       <View style={styles.sectionRow}>
@@ -59,35 +78,45 @@ export default function ExpensesScreen() {
       </View>
 
       <View style={{ gap: 10 }}>
-        {recentTransactions.map((transaction) => (
-          <TransactionRow key={transaction.transaction_id} txn={transaction} />
-        ))}
+        {hasConnectedBank ? (
+          recentTransactions.map((transaction) => (
+            <TransactionRow key={transaction.transaction_id} txn={transaction} />
+          ))
+        ) : (
+          <BankDataPlaceholder compact />
+        )}
       </View>
 
       <Text style={[styles.sectionTitle, { marginTop: 16 }]}>Analysis</Text>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingVertical: 10 }}>
-        <InsightCard title="Expense Categories" subtitle={`${formatCurrency(aprilSpending)} spent in April`} tone="blue" cta="See More" />
-        <InsightCard title="Cash Flow" subtitle={`${formatCurrency(cashFlow.net)} net`} tone={cashFlow.net >= 0 ? 'green' : 'red'} cta="See More" />
-        <InsightCard
-          title="Recurring Transactions"
-          subtitle={topSubscription ? `${topSubscription.merchantName} ${formatCurrency(topSubscription.amount)}` : 'No recurring subscriptions found'}
-          tone="red"
-          cta="See all"
-        />
-        <InsightCard
-          title="High Spending"
-          subtitle={topCategory ? `${topCategory.category.replaceAll('_', ' ')} leads spending` : 'No high-spend category yet'}
-          tone="blue"
-          cta="Review"
-        />
-        <InsightCard title="Make a budget" subtitle="Help yourself with a budget" tone="blue" cta="See all" />
+      {hasConnectedBank ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingVertical: 10 }}>
+          <InsightCard title="Expense Categories" subtitle={`${formatCurrency(aprilSpending)} spent in April`} tone="blue" cta="See More" />
+          <InsightCard title="Cash Flow" subtitle={`${formatCurrency(cashFlow.net)} net`} tone={cashFlow.net >= 0 ? 'green' : 'red'} cta="See More" />
+          <InsightCard
+            title="Recurring Transactions"
+            subtitle={topSubscription ? `${topSubscription.merchantName} ${formatCurrency(topSubscription.amount)}` : 'No recurring subscriptions found'}
+            tone="red"
+            cta="See all"
+          />
+          <InsightCard
+            title="High Spending"
+            subtitle={topCategory ? `${topCategory.category.replaceAll('_', ' ')} leads spending` : 'No high-spend category yet'}
+            tone="blue"
+            cta="Review"
+          />
+          <InsightCard title="Make a budget" subtitle="Help yourself with a budget" tone="blue" cta="See all" />
+        </ScrollView>
+      ) : (
+        <BankDataPlaceholder compact />
+      )}
       </ScrollView>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: Colors.bg },
   container: { padding: 16, paddingTop: 18, paddingBottom: 30 },
   header: { fontSize: 20, fontWeight: '800' },
   pills: { flexDirection: 'row', gap: 10, marginTop: 14 },
@@ -97,6 +126,7 @@ const styles = StyleSheet.create({
   pillTextActive: { color: '#fff' },
   chartCard: { marginTop: 14, backgroundColor: '#fff', borderWidth: 1, borderColor: Colors.border, borderRadius: 16, padding: 14 },
   fakeChart: { minHeight: 160, marginTop: 10, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, justifyContent: 'center', gap: 10, padding: 12 },
+  placeholderWrap: { marginTop: 10 },
   barRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   barLabel: { width: 92, color: Colors.muted, fontSize: 11, fontWeight: '800' },
   barTrack: { flex: 1, height: 8, borderRadius: 999, backgroundColor: '#EEF2FF', overflow: 'hidden' },

@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useAuth } from '../../src/auth/useAuth';
+import { normalizeEmail } from '../../src/auth/userIdentity';
 import { BrandMark } from '../../src/components/BrandMark';
 import { Colors } from '../../src/theme/colors';
 
@@ -13,9 +14,15 @@ export default function SignUpScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const passwordInputRef = useRef<TextInput>(null);
+  const confirmPasswordInputRef = useRef<TextInput>(null);
 
   async function onCreate() {
-    const normalizedEmail = email.trim().toLowerCase();
+    if (busy) {
+      return;
+    }
+
+    const normalizedEmail = normalizeEmail(email);
 
     if (!normalizedEmail || !password || !confirmPassword) {
       setError('Enter your email and password to continue.');
@@ -59,20 +66,28 @@ export default function SignUpScreen() {
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
+          returnKeyType="next"
+          onSubmitEditing={() => passwordInputRef.current?.focus()}
           placeholder="email@domain.com"
           style={styles.input}
         />
         <TextInput
+          ref={passwordInputRef}
           value={password}
           onChangeText={setPassword}
           secureTextEntry
+          returnKeyType="next"
+          onSubmitEditing={() => confirmPasswordInputRef.current?.focus()}
           placeholder="Password"
           style={styles.input}
         />
         <TextInput
+          ref={confirmPasswordInputRef}
           value={confirmPassword}
           onChangeText={setConfirmPassword}
           secureTextEntry
+          returnKeyType="go"
+          onSubmitEditing={onCreate}
           placeholder="Confirm password"
           style={styles.input}
         />

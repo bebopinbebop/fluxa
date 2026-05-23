@@ -16,10 +16,15 @@ import {
   getMyProfile,
   syncMyProfileFinancials,
   type CreateMyProfileInput,
+  type UpdateMyProfileInput,
   type UserProfile,
+  updateMyProfile,
 } from '../lib/profile';
+import { getMyFinancialSnapshot, type UserFinancialSnapshot } from '../lib/financialSnapshot';
+import { hasConnectedPlaidItems } from '../lib/plaidConnection';
 import { ensureMyTransactionsFromCloud } from '../lib/transactionStore';
 import type { Transaction } from '../types/transaction';
+import { normalizeEmail } from './userIdentity';
 
 type SignUpInput = {
   email: string;
@@ -36,17 +41,24 @@ type AuthUser = Awaited<ReturnType<typeof getCurrentUser>>;
 type AuthCtx = {
   user: AuthUser | null;
   profile: UserProfile | null;
+  financialSnapshot: UserFinancialSnapshot | null;
   transactions: Transaction[];
+  hasConnectedBank: boolean;
   loading: boolean;
   transactionsLoading: boolean;
+  isRefreshingData: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (input: SignUpInput) => Promise<void>;
   confirmSignUp: (input: ConfirmSignUpInput) => Promise<void>;
   signOut: () => Promise<void>;
   cancelOnboarding: () => Promise<void>;
   refreshProfile: () => Promise<UserProfile | null>;
+  refreshFinancialSnapshot: () => Promise<UserFinancialSnapshot | null>;
+  refreshBankConnection: () => Promise<boolean>;
   refreshTransactions: (email?: string | null) => Promise<Transaction[]>;
+  refreshAppData: () => Promise<void>;
   completeOnboarding: (input: CreateMyProfileInput) => Promise<UserProfile | null>;
+  updateProfile: (input: UpdateMyProfileInput) => Promise<UserProfile | null>;
 };
 
 export const AuthContext = createContext<AuthCtx | null>(null);
@@ -54,9 +66,12 @@ export const AuthContext = createContext<AuthCtx | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [financialSnapshot, setFinancialSnapshot] = useState<UserFinancialSnapshot | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [hasConnectedBank, setHasConnectedBank] = useState(false);
   const [loading, setLoading] = useState(true);
   const [transactionsLoading, setTransactionsLoading] = useState(false);
+  const [isRefreshingData, setIsRefreshingData] = useState(false);
 
   const router = useRouter();
   const segments = useSegments();
@@ -71,6 +86,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('[Auth] profile load failed', error);
       setProfile(null);
       return null;
+    }
+  }, []);
+
+  const refreshFinancialSnapshot = useCallback(async () => {
+    try {
+      const nextSnapshot = await getMyFinancialSnapshot();
+      setFinancialSnapshot(nextSnapshot);
+      return nextSnapshot;
+    } catch (error) {
+      console.error('[Auth] financial snapshot load failed', error);
+      setFinancialSnapshot(null);
+      return null;
+    }
+  }, []);
+
+  const refreshBankConnection = useCallback(async () => {
+    try {
+      const connected = await hasConnectedPlaidItems();
+      setHasConnectedBank(connected);
+      return connected;
+    } catch (error) {
+      console.error('[Auth] bank connection load failed', error);
+      setHasConnectedBank(false);
+      return false;
     }
   }, []);
 
@@ -99,18 +138,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const nextProfile = await refreshProfile();
 
       if (nextProfile?.email) {
-        await refreshTransactions(nextProfile.email);
+        const [connectedByItem, nextTransactions, nextSnapshot] = await Promise.all([
+          refreshBankConnection(),
+          refreshTransactions(nextProfile.email),
+          refreshFinancialSnapshot(),
+        ]);
+        setHasConnectedBank(hasBankBackedData(connectedByItem, nextTransactions, nextSnapshot));
       } else {
+        setHasConnectedBank(false);
         setTransactions([]);
+        setFinancialSnapshot(null);
       }
     } catch {
       setUser(null);
       setProfile(null);
+      setHasConnectedBank(false);
+      setFinancialSnapshot(null);
       setTransactions([]);
     } finally {
       setLoading(false);
     }
-  }, [refreshProfile, refreshTransactions]);
+  }, [refreshBankConnection, refreshFinancialSnapshot, refreshProfile, refreshTransactions]);
+
+  const refreshAppData = useCallback(async () => {
+    setIsRefreshingData(true);
+
+    try {
+      const nextProfile = await refreshProfile();
+
+      if (nextProfile?.email) {
+        const [connectedByItem, nextTransactions, nextSnapshot] = await Promise.all([
+          refreshBankConnection(),
+          refreshTransactions(nextProfile.email),
+          refreshFinancialSnapshot(),
+        ]);
+        setHasConnectedBank(hasBankBackedData(connectedByItem, nextTransactions, nextSnapshot));
+      } else {
+        setHasConnectedBank(false);
+        setTransactions([]);
+        setFinancialSnapshot(null);
+      }
+    } finally {
+      setIsRefreshingData(false);
+    }
+  }, [refreshBankConnection, refreshFinancialSnapshot, refreshProfile, refreshTransactions]);
 
   useEffect(() => {
     void refreshAuthState();
@@ -142,7 +213,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (user && profile && !inTabsGroup) {
+    if (user && profile && !inTabsGroup && !inOnboardingGroup) {
       router.replace('/(tabs)');
     }
   }, [loading, profile, router, segments, user]);
@@ -151,12 +222,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () => ({
       user,
       profile,
+      financialSnapshot,
       transactions,
+      hasConnectedBank,
       loading,
       transactionsLoading,
+      isRefreshingData,
 
       signIn: async (email: string, password: string) => {
-        const username = email.trim().toLowerCase();
+        const username = normalizeEmail(email);
 
         const result = await amplifySignIn({ username, password });
 
@@ -169,7 +243,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       },
 
       signUp: async ({ email, password }: SignUpInput) => {
-        const username = email.trim().toLowerCase();
+        const username = normalizeEmail(email);
 
         await amplifySignUp({
           username,
@@ -185,7 +259,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       confirmSignUp: async ({ email, confirmationCode }: ConfirmSignUpInput) => {
         const result = await amplifyConfirmSignUp({
-          username: email.trim().toLowerCase(),
+          username: normalizeEmail(email),
           confirmationCode: confirmationCode.trim(),
         });
 
@@ -207,6 +281,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } finally {
           setUser(null);
           setProfile(null);
+          setHasConnectedBank(false);
+          setFinancialSnapshot(null);
           setTransactions([]);
         }
       },
@@ -223,22 +299,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } finally {
           setUser(null);
           setProfile(null);
+          setHasConnectedBank(false);
+          setFinancialSnapshot(null);
           setTransactions([]);
         }
       },
 
       refreshProfile,
+      refreshFinancialSnapshot,
+      refreshBankConnection,
       refreshTransactions,
+      refreshAppData,
 
       completeOnboarding: async (input: CreateMyProfileInput) => {
         const nextProfile = await createMyProfile(input);
         const syncedProfile = await syncMyProfileFinancials(nextProfile);
         setProfile(syncedProfile);
-        await refreshTransactions(syncedProfile?.email ?? input.email);
+        const [connectedByItem, nextTransactions, nextSnapshot] = await Promise.all([
+          refreshBankConnection(),
+          refreshTransactions(syncedProfile?.email ?? input.email),
+          refreshFinancialSnapshot(),
+        ]);
+        setHasConnectedBank(hasBankBackedData(connectedByItem, nextTransactions, nextSnapshot));
         return syncedProfile;
       },
+
+      updateProfile: async (input: UpdateMyProfileInput) => {
+        const nextProfile = await updateMyProfile(input);
+        setProfile(nextProfile);
+        return nextProfile;
+      },
     }),
-    [loading, profile, refreshProfile, refreshTransactions, router, transactions, transactionsLoading, user]
+    [
+      financialSnapshot,
+      hasConnectedBank,
+      isRefreshingData,
+      loading,
+      profile,
+      refreshAppData,
+      refreshBankConnection,
+      refreshFinancialSnapshot,
+      refreshProfile,
+      refreshTransactions,
+      router,
+      transactions,
+      transactionsLoading,
+      user,
+    ]
   );
 
   if (loading) {
@@ -250,4 +357,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+function hasBankBackedData(
+  connectedByItem: boolean,
+  transactions: Transaction[],
+  snapshot: UserFinancialSnapshot | null
+) {
+  return (
+    connectedByItem ||
+    transactions.length > 0 ||
+    (snapshot?.connectedAccountCount ?? 0) > 0 ||
+    (snapshot?.connectedInstitutionCount ?? 0) > 0 ||
+    (snapshot?.transactionCount ?? 0) > 0
+  );
 }

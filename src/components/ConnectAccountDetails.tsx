@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, TextInput, ScrollView } from 'react-native';
 import { createPlaidLinkToken, exchangePlaidPublicToken } from '../lib/plaidApi';
 import { Colors } from '../theme/colors';
 import { useAuth } from '../auth/useAuth';
+import { usePullToRefresh } from './PullToRefresh';
 
 const sandboxPersonas = [
   {
@@ -23,7 +24,8 @@ const sandboxPersonas = [
 ];
 
 export function ConnectAccountDetails() {
-  const { profile, refreshTransactions } = useAuth();
+  const pullToRefresh = usePullToRefresh();
+  const { profile, refreshBankConnection, refreshFinancialSnapshot, refreshTransactions } = useAuth();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -32,6 +34,9 @@ export function ConnectAccountDetails() {
   const [institutionName, setInstitutionName] = useState('First Platypus Bank');
   const [linkSessionId, setLinkSessionId] = useState('');
   const [sandboxPersona, setSandboxPersona] = useState(defaultPersonaForEmail(profile?.email));
+  const institutionIdInputRef = useRef<TextInput>(null);
+  const institutionNameInputRef = useRef<TextInput>(null);
+  const linkSessionIdInputRef = useRef<TextInput>(null);
 
   const selectedPersona = sandboxPersonas.find((persona) => persona.value === sandboxPersona) ?? sandboxPersonas[0];
   const isReadyToExchange = useMemo(() => {
@@ -39,6 +44,16 @@ export function ConnectAccountDetails() {
   }, [publicToken, institutionId]);
 
   async function handlePlaidSuccess(publicTokenValue: string, metadata: any) {
+    console.log('[PlaidFlow][App:ConnectAccount] Plaid success received', {
+      publicTokenPreview: maskToken(publicTokenValue),
+      institutionId: metadata?.institution?.id ?? institutionId.trim(),
+      institutionName: metadata?.institution?.name ?? institutionName.trim(),
+      linkSessionId: metadata?.linkSessionId ?? linkSessionId.trim(),
+      selectedAccountCount: metadata?.accounts?.length ?? 0,
+      sandboxPersona,
+      metadata: sanitizeForLog(metadata),
+    });
+
     setStatus('Saving connected account...');
 
     await exchangePlaidPublicToken(publicTokenValue, {
@@ -51,32 +66,57 @@ export function ConnectAccountDetails() {
       sandbox_persona: sandboxPersona,
     });
 
+    console.log('[PlaidFlow][App:ConnectAccount] public token exchange complete; refreshing transactions');
+    await refreshBankConnection();
     await refreshTransactions(profile?.email);
+    console.log('[PlaidFlow][App:ConnectAccount] transactions refreshed; refreshing financial snapshot');
+    await refreshFinancialSnapshot();
+    console.log('[PlaidFlow][App:ConnectAccount] financial snapshot refreshed');
     setStatus('Account connected and transactions synced.');
   }
 
   async function onAddAccount() {
+    console.log('[PlaidFlow][App:ConnectAccount] Add Account pressed', {
+      email: profile?.email ?? null,
+      sandboxPersona,
+    });
+
     setBusy(true);
     setError(null);
     setStatus('Creating Plaid Link session...');
 
     try {
       const result = await createPlaidLinkToken();
+      console.log('[PlaidFlow][App:ConnectAccount] importing Plaid Link SDK');
       const plaid = await import('react-native-plaid-link-sdk');
 
+      console.log('[PlaidFlow][App:ConnectAccount] creating Plaid Link instance', {
+        hasLinkToken: Boolean(result.link_token),
+      });
       await plaid.destroy?.();
       plaid.create({ token: result.link_token });
+      console.log('[PlaidFlow][App:ConnectAccount] opening Plaid Link');
       plaid.open({
         onSuccess: async (success) => {
           try {
+            console.log('[PlaidFlow][App:ConnectAccount] Plaid Link onSuccess callback');
             await handlePlaidSuccess(success.publicToken, success.metadata);
           } catch (e: any) {
+            console.log('[PlaidFlow][App:ConnectAccount] Plaid Link success handling failed', {
+              message: e?.message,
+            });
             setError(e?.message ?? 'Plaid account connected, but saving it failed.');
           } finally {
             setBusy(false);
           }
         },
         onExit: (exit) => {
+          console.log('[PlaidFlow][App:ConnectAccount] Plaid Link onExit callback', {
+            errorCode: exit?.error?.errorCode ?? null,
+            errorMessage: exit?.error?.errorMessage ?? null,
+            linkSessionId: exit?.metadata?.linkSessionId ?? null,
+            institutionId: exit?.metadata?.institution?.id ?? null,
+          });
           setBusy(false);
           setStatus(null);
 
@@ -86,6 +126,9 @@ export function ConnectAccountDetails() {
         },
       });
     } catch (e: any) {
+      console.log('[PlaidFlow][App:ConnectAccount] Add Account failed before/during Link open', {
+        message: e?.message,
+      });
       setBusy(false);
       setStatus(null);
       setError(
@@ -97,6 +140,14 @@ export function ConnectAccountDetails() {
   }
 
   async function onExchangeToken() {
+    console.log('[PlaidFlow][App:ConnectAccount] manual public token exchange pressed', {
+      publicTokenPreview: maskToken(publicToken.trim()),
+      institutionId: institutionId.trim(),
+      institutionName: institutionName.trim(),
+      linkSessionId: linkSessionId.trim(),
+      sandboxPersona,
+    });
+
     setBusy(true);
     setError(null);
     setStatus('Saving sandbox public token...');
@@ -121,8 +172,18 @@ export function ConnectAccountDetails() {
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.subtitle}>Connect bank accounts securely with Plaid</Text>
+    <View style={styles.screen}>
+      {pullToRefresh.indicator}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        onScroll={pullToRefresh.onScroll}
+        onScrollEndDrag={pullToRefresh.onScrollEndDrag}
+        scrollEventThrottle={pullToRefresh.scrollEventThrottle}
+        bounces
+        alwaysBounceVertical
+      >
+        <Text style={styles.subtitle}>Connect bank accounts securely with Plaid</Text>
 
       <View style={styles.logoBox}>
         <Text style={{ fontSize: 44, fontWeight: '900', color: Colors.blue }}>F</Text>
@@ -161,27 +222,38 @@ export function ConnectAccountDetails() {
           value={publicToken}
           onChangeText={setPublicToken}
           autoCapitalize="none"
+          returnKeyType="next"
+          onSubmitEditing={() => institutionIdInputRef.current?.focus()}
           placeholder="public-token-from-plaid-link"
           style={styles.input}
         />
         <TextInput
+          ref={institutionIdInputRef}
           value={institutionId}
           onChangeText={setInstitutionId}
           autoCapitalize="none"
+          returnKeyType="next"
+          onSubmitEditing={() => institutionNameInputRef.current?.focus()}
           placeholder="institution_id"
           style={styles.input}
         />
         <TextInput
+          ref={institutionNameInputRef}
           value={institutionName}
           onChangeText={setInstitutionName}
           autoCapitalize="none"
+          returnKeyType="next"
+          onSubmitEditing={() => linkSessionIdInputRef.current?.focus()}
           placeholder="institution name"
           style={styles.input}
         />
         <TextInput
+          ref={linkSessionIdInputRef}
           value={linkSessionId}
           onChangeText={setLinkSessionId}
           autoCapitalize="none"
+          returnKeyType="go"
+          onSubmitEditing={onExchangeToken}
           placeholder="link_session_id (optional)"
           style={styles.input}
         />
@@ -195,10 +267,31 @@ export function ConnectAccountDetails() {
         </Pressable>
       </View>
 
-      <Text style={styles.note}>
-        Cognito owns the user. Plaid creates Items after Link. Fluxa joins them by saving each Plaid Item under the signed-in Cognito owner.
-      </Text>
-    </ScrollView>
+        <Text style={styles.note}>
+          Cognito owns the user. Plaid creates Items after Link. Fluxa joins them by saving each Plaid Item under the signed-in Cognito owner.
+        </Text>
+      </ScrollView>
+    </View>
+  );
+}
+
+function maskToken(token: string) {
+  if (!token) {
+    return null;
+  }
+
+  return `${token.slice(0, 12)}...${token.slice(-6)}`;
+}
+
+function sanitizeForLog(value: unknown) {
+  return JSON.parse(
+    JSON.stringify(value, (key, nestedValue) => {
+      if (key.toLowerCase().includes('token')) {
+        return typeof nestedValue === 'string' ? maskToken(nestedValue) : '[REDACTED]';
+      }
+
+      return nestedValue;
+    })
   );
 }
 
@@ -210,6 +303,7 @@ function defaultPersonaForEmail(email?: string | null) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
+  scroll: { flex: 1 },
   content: { padding: 16, paddingTop: 0, paddingBottom: 40, alignItems: 'center' },
   subtitle: { color: Colors.muted, textAlign: 'center' },
   logoBox: { marginTop: 20, alignItems: 'center', justifyContent: 'center', height: 132 },

@@ -1,7 +1,10 @@
 import { View, Text, StyleSheet, ScrollView, ScrollViewProps, StyleProp, ViewStyle } from 'react-native';
 import { Colors } from '../theme/colors';
 import { ExpandRow } from './ExpandRow';
+import { usePullToRefresh } from './PullToRefresh';
 import { assetCategories, calculateFinancialTotals, formatCategoryAmount, formatCurrency } from '../lib/financials';
+import { useAuth } from '../auth/useAuth';
+import { BankDataPlaceholder } from './BankDataPlaceholder';
 
 type AssetsDetailsProps = {
   containerStyle?: StyleProp<ViewStyle>;
@@ -18,17 +21,20 @@ export function AssetsDetails({
   showTitle = true,
   totalAssets,
 }: AssetsDetailsProps) {
+  const pullToRefresh = usePullToRefresh();
+  const { hasConnectedBank } = useAuth();
   const resolvedTotalAssets = totalAssets ?? calculateFinancialTotals().totalAssets;
 
   return (
     <View style={[styles.container, containerStyle]}>
+      {pullToRefresh.indicator}
       <View style={[styles.headerContent, contentContainerStyle]}>
         {showTitle ? <Text style={styles.title}>Assets</Text> : null}
         <Text style={styles.sub}>All of your value calculated without debt.</Text>
 
         <View style={styles.totalBlock}>
           <Text style={styles.totalLabel}>Total Assets:</Text>
-          <Text style={styles.totalValue}>{formatCurrency(resolvedTotalAssets)}</Text>
+          <Text style={styles.totalValue}>{hasConnectedBank ? formatCurrency(resolvedTotalAssets) : '--'}</Text>
         </View>
       </View>
 
@@ -37,25 +43,34 @@ export function AssetsDetails({
         contentContainerStyle={styles.rowsContent}
         showsVerticalScrollIndicator={false}
         {...scrollProps}
+        onScroll={pullToRefresh.onScroll}
+        onScrollEndDrag={pullToRefresh.onScrollEndDrag}
+        scrollEventThrottle={pullToRefresh.scrollEventThrottle}
+        bounces
+        alwaysBounceVertical
       >
-        {assetCategories.map((category) => (
-          <ExpandRow
-            key={category.title}
-            title={category.title}
-            value={formatCategoryAmount(category.amount)}
-            tone={category.tone}
-          >
-            {category.details?.length ? (
-              <View style={styles.innerCard}>
-                {category.details.map((detail) => (
-                  <Text key={detail} style={styles.innerLine}>
-                    {detail}
-                  </Text>
-                ))}
-              </View>
-            ) : null}
-          </ExpandRow>
-        ))}
+        {hasConnectedBank ? (
+          assetCategories.map((category) => (
+            <ExpandRow
+              key={category.title}
+              title={category.title}
+              value={formatCategoryAmount(category.amount)}
+              tone={category.tone}
+            >
+              {category.details?.length ? (
+                <View style={styles.innerCard}>
+                  {category.details.map((detail) => (
+                    <Text key={detail} style={styles.innerLine}>
+                      {detail}
+                    </Text>
+                  ))}
+                </View>
+              ) : null}
+            </ExpandRow>
+          ))
+        ) : (
+          <BankDataPlaceholder />
+        )}
       </ScrollView>
     </View>
   );

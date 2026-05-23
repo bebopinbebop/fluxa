@@ -2,6 +2,7 @@ import { a, defineData, type ClientSchema } from '@aws-amplify/backend';
 import { createPlaidLinkToken } from '../functions/create-plaid-link-token/resource';
 import { exchangePlaidPublicToken } from '../functions/exchange-plaid-public-token/resource';
 import { syncPlaidTransactions } from '../functions/sync-plaid-transactions/resource';
+import { calculateUserFinancialSnapshot } from '../functions/calculate-user-financial-snapshot/resource';
 
 const schema = a.schema({
   PlaidLinkTokenResponse: a.customType({
@@ -61,7 +62,12 @@ const schema = a.schema({
   UserProfile: a
     .model({
       email: a.email().required(),
+      name: a.string(),
       firstName: a.string(),
+      dateOfBirth: a.date(),
+      phoneNumber: a.string(),
+      profileImageKey: a.string(),
+      originalProfileImageKey: a.string(),
       ageRange: a.string(),
       monthlyIncome: a.float(),
       monthlyExpenses: a.float(),
@@ -71,6 +77,31 @@ const schema = a.schema({
       totalNetWorth: a.float(),
       onboardingComplete: a.boolean().required(),
     })
+    .authorization((allow) => [allow.owner()]),
+
+  UserFinancialSnapshot: a
+    .model({
+      ownerSub: a.string().required(),
+      totalAssets: a.float(),
+      totalLiabilities: a.float(),
+      totalNetWorth: a.float(),
+      monthlyIncome: a.float(),
+      monthlyExpenses: a.float(),
+      monthlyCashFlow: a.float(),
+      savingsRate: a.float(),
+      topSpendingCategory: a.string(),
+      topSpendingCategoryAmount: a.float(),
+      recurringSubscriptionCount: a.integer(),
+      connectedInstitutionCount: a.integer(),
+      connectedAccountCount: a.integer(),
+      transactionCount: a.integer(),
+      pendingTransactionCount: a.integer(),
+      lastTransactionDate: a.date(),
+      calculatedAt: a.datetime(),
+    })
+    .secondaryIndexes((index) => [
+      index('ownerSub').queryField('listUserFinancialSnapshotByOwnerSub'),
+    ])
     .authorization((allow) => [allow.owner()]),
 
   PlaidItem: a
@@ -111,6 +142,7 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('account_id'),
       index('plaid_item_id'),
+      index('ownerSub').queryField('listPlaidAccountByOwnerSub'),
     ])
     .authorization((allow) => [allow.owner()]),
 
@@ -168,11 +200,15 @@ const schema = a.schema({
       index('date'),
       index('merchant_name'),
       index('plaid_item_id'),
+      index('ownerSub').queryField('listPlaidTransactionByOwnerSub'),
     ])
     .authorization((allow) => [allow.owner()]),
 
   createPlaidLinkToken: a
     .query()
+    .arguments({
+      platform: a.string(),
+    })
     .returns(a.ref('PlaidLinkTokenResponse'))
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(createPlaidLinkToken)),
@@ -198,9 +234,16 @@ const schema = a.schema({
     .returns(a.ref('PlaidSyncResult'))
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(syncPlaidTransactions)),
+
+  calculateUserFinancialSnapshot: a
+    .mutation()
+    .returns(a.ref('UserFinancialSnapshot'))
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(calculateUserFinancialSnapshot)),
 }).authorization((allow) => [
   allow.resource(exchangePlaidPublicToken).to(['query', 'mutate']),
   allow.resource(syncPlaidTransactions).to(['query', 'mutate']),
+  allow.resource(calculateUserFinancialSnapshot).to(['query', 'mutate']),
 ]);
 
 export type Schema = ClientSchema<typeof schema>;

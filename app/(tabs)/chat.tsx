@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, Pressable, FlatList } from 'react-native';
+import { usePullToRefresh } from '../../src/components/PullToRefresh';
 import { Colors } from '../../src/theme/colors';
 
 type Msg = { id: string; from: 'me' | 'advisor'; text: string };
 
 export default function ChatScreen() {
+  const pullToRefresh = usePullToRefresh();
   const [draft, setDraft] = useState('');
   const [msgs, setMsgs] = useState<Msg[]>([
     { id: '1', from: 'advisor', text: "Hey, I’m Jordan. Heard you needed some help?" },
@@ -23,6 +25,7 @@ export default function ChatScreen() {
 
   return (
     <View style={styles.screen}>
+      {pullToRefresh.indicator}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Your <Text style={{ color: Colors.blue }}>Financial Resource</Text></Text>
         <Text style={styles.headerSub}>Your Advisor is: <Text style={{ fontWeight: '700' }}>Jordan Schenkman</Text></Text>
@@ -32,6 +35,11 @@ export default function ChatScreen() {
         <FlatList
           inverted
           data={list}
+          onScroll={pullToRefresh.onScroll}
+          onScrollEndDrag={pullToRefresh.onScrollEndDrag}
+          scrollEventThrottle={pullToRefresh.scrollEventThrottle}
+          bounces
+          alwaysBounceVertical
           keyExtractor={(m) => m.id}
           renderItem={({ item }) => (
             <View style={[styles.bubble, item.from === 'advisor' ? styles.advisorBubble : styles.meBubble]}>
@@ -46,6 +54,8 @@ export default function ChatScreen() {
         <TextInput
           value={draft}
           onChangeText={setDraft}
+          returnKeyType="send"
+          onSubmitEditing={send}
           placeholder="Message Jordan and he’ll reply…"
           style={styles.input}
         />

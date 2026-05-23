@@ -1,7 +1,9 @@
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '../../amplify/data/resource';
-import { getSeedTransactionsForEmail } from '../data/seedTransactions';
 import type { Transaction } from '../types/transaction';
+import { logAwsTableAccess } from './awsDataLog';
+import { hasConnectedPlaidItems } from './plaidConnection';
+import { syncPlaidTransactions } from './plaidApi';
 import { sortTransactions } from './transactions';
 
 const client = generateClient<Schema>();
@@ -20,35 +22,42 @@ export async function listMyTransactionsFromCloud() {
 }
 
 export async function ensureMyTransactionsFromCloud(email?: string | null) {
-  const existingRecords = await listMyTransactionRecords();
+  console.log('[PlaidFlow][App:Transactions] ensure transactions start', {
+    email,
+  });
+
+  let existingRecords = await listMyTransactionRecords();
   const hasPlaidItems = await hasConnectedPlaidItems();
+
+  console.log('[PlaidFlow][App:Transactions] existing cloud state loaded', {
+    existingRecordCount: existingRecords.length,
+    hasPlaidItems,
+  });
+
+  if (hasPlaidItems) {
+    try {
+      console.log('[PlaidFlow][App:Transactions] connected Plaid Items found; syncing before read');
+      await syncPlaidTransactions();
+      existingRecords = await listMyTransactionRecords();
+      console.log('[PlaidFlow][App:Transactions] sync before read complete', {
+        existingRecordCount: existingRecords.length,
+      });
+    } catch (error) {
+      console.error('[Transactions] Plaid sync failed; using saved transactions', error);
+    }
+  }
+
   const existingTransactions = dedupeTransactions(
     existingRecords
       .filter((record: PlaidTransactionRecord) => !record.removed)
       .map(transactionRecordToAppTransaction)
   );
-  const seedTransactions = getSeedTransactionsForEmail(email);
-
-  if (
-    !hasPlaidItems &&
-    seedTransactions.length > 0 &&
-    shouldResetSeedTransactions(existingRecords.length, existingTransactions, seedTransactions)
-  ) {
-    await replaceMyTransactionsWithSeed(existingRecords, seedTransactions);
-    return listMyTransactionsFromCloud();
-  }
+  console.log('[PlaidFlow][App:Transactions] ensure transactions complete', {
+    transactionCount: existingTransactions.length,
+    source: hasPlaidItems ? 'plaid-cloud' : 'no-bank-connected',
+  });
 
   return sortTransactions(existingTransactions);
-}
-
-async function hasConnectedPlaidItems() {
-  const { data, errors } = await client.models.PlaidItem.list();
-
-  if (errors?.length) {
-    throw new Error(errors[0].message);
-  }
-
-  return Boolean(data?.length);
 }
 
 export async function saveMyTransactionsToCloud(transactions: Transaction[]) {
@@ -61,6 +70,7 @@ export async function saveMyTransactionsToCloud(transactions: Transaction[]) {
       continue;
     }
 
+    logAwsTableAccess('PlaidTransaction', 'create');
     const { errors } = await client.models.PlaidTransaction.create({
       ...transaction,
       synced_at: new Date().toISOString(),
@@ -85,6 +95,7 @@ function dedupeTransactions(transactions: Transaction[]) {
 }
 
 async function listMyTransactionRecords() {
+  logAwsTableAccess('PlaidTransaction', 'list');
   const { data, errors } = await client.models.PlaidTransaction.list();
 
   if (errors?.length) {
@@ -92,44 +103,6 @@ async function listMyTransactionRecords() {
   }
 
   return data ?? [];
-}
-
-async function replaceMyTransactionsWithSeed(records: PlaidTransactionRecord[], seedTransactions: Transaction[]) {
-  for (const record of records) {
-    const { errors } = await client.models.PlaidTransaction.delete({ id: record.id });
-
-    if (errors?.length) {
-      throw new Error(errors[0].message);
-    }
-  }
-
-  await saveMyTransactionsToCloud(seedTransactions);
-}
-
-function shouldResetSeedTransactions(
-  existingRecordCount: number,
-  existingTransactions: Transaction[],
-  seedTransactions: Transaction[]
-) {
-  if (existingRecordCount !== existingTransactions.length) {
-    return true;
-  }
-
-  if (existingTransactions.length !== seedTransactions.length) {
-    return true;
-  }
-
-  const existingSignature = buildSeedSignature(existingTransactions);
-  const seedSignature = buildSeedSignature(seedTransactions);
-
-  return existingSignature !== seedSignature;
-}
-
-function buildSeedSignature(transactions: Transaction[]) {
-  return transactions
-    .map((transaction) => `${transaction.transaction_id}:${transaction.amount}:${transaction.date}`)
-    .sort()
-    .join('|');
 }
 
 function transactionRecordToAppTransaction(record: PlaidTransactionRecord): Transaction {

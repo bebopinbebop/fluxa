@@ -13,5 +13,7 @@ export const createPlaidLinkToken = defineFunction({
     PLAID_PRODUCTS: 'transactions',
     PLAID_COUNTRY_CODES: 'US',
     PLAID_LANGUAGE: 'en',
+    PLAID_IOS_REDIRECT_URI: secret('PLAID_IOS_REDIRECT_URI'),
+    PLAID_ANDROID_PACKAGE_NAME: 'com.apexcloudindustries.fluxa',
   },
 });

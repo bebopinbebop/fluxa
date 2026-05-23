@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
 import { Link } from 'expo-router';
 import { useAuth } from '../../src/auth/useAuth';
+import { normalizeEmail } from '../../src/auth/userIdentity';
 import { BrandMark } from '../../src/components/BrandMark';
 import { Colors } from '../../src/theme/colors';
 
@@ -13,10 +14,14 @@ export default function SignInScreen() {
   const [busy, setBusy] = useState(false);
 
   async function onLogin() {
+    if (busy) {
+      return;
+    }
+
     setError(null);
     setBusy(true);
     try {
-      await signIn(email.trim(), password);
+      await signIn(normalizeEmail(email), password);
     } catch (e: any) {
       setError(e?.message ?? 'An unknown error has occurred while signing in.');
     } finally {
@@ -39,6 +44,7 @@ export default function SignInScreen() {
           onChangeText={setEmail}
           keyboardType="email-address"
           autoCapitalize="none"
+          returnKeyType="next"
           placeholder="email@domain.com"
           style={styles.input}
         />
@@ -46,6 +52,8 @@ export default function SignInScreen() {
           value={password}
           onChangeText={setPassword}
           secureTextEntry
+          returnKeyType="go"
+          onSubmitEditing={onLogin}
           placeholder="password"
           style={styles.input}
         />

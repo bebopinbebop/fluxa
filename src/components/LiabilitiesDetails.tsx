@@ -1,7 +1,10 @@
 import { ScrollView, ScrollViewProps, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { ExpandRow } from './ExpandRow';
+import { usePullToRefresh } from './PullToRefresh';
 import { Colors } from '../theme/colors';
 import { calculateFinancialTotals, formatCategoryAmount, formatCurrency, liabilityCategories } from '../lib/financials';
+import { useAuth } from '../auth/useAuth';
+import { BankDataPlaceholder } from './BankDataPlaceholder';
 
 type LiabilitiesDetailsProps = {
   containerStyle?: StyleProp<ViewStyle>;
@@ -18,17 +21,20 @@ export function LiabilitiesDetails({
   showTitle = true,
   totalLiabilities,
 }: LiabilitiesDetailsProps) {
+  const pullToRefresh = usePullToRefresh();
+  const { hasConnectedBank } = useAuth();
   const resolvedTotalLiabilities = totalLiabilities ?? calculateFinancialTotals().totalLiabilities;
 
   return (
     <View style={[styles.container, containerStyle]}>
+      {pullToRefresh.indicator}
       <View style={[styles.headerContent, contentContainerStyle]}>
         {showTitle ? <Text style={styles.title}>Liabilities</Text> : null}
         <Text style={styles.sub}>All of your commitments calculated.</Text>
 
         <View style={styles.totalBlock}>
           <Text style={styles.totalLabel}>Total Liabilities:</Text>
-          <Text style={styles.totalValue}>{formatCurrency(resolvedTotalLiabilities)}</Text>
+          <Text style={styles.totalValue}>{hasConnectedBank ? formatCurrency(resolvedTotalLiabilities) : '--'}</Text>
         </View>
       </View>
 
@@ -37,15 +43,24 @@ export function LiabilitiesDetails({
         contentContainerStyle={styles.rowsContent}
         showsVerticalScrollIndicator={false}
         {...scrollProps}
+        onScroll={pullToRefresh.onScroll}
+        onScrollEndDrag={pullToRefresh.onScrollEndDrag}
+        scrollEventThrottle={pullToRefresh.scrollEventThrottle}
+        bounces
+        alwaysBounceVertical
       >
-        {liabilityCategories.map((category) => (
-          <ExpandRow
-            key={category.title}
-            title={category.title}
-            value={formatCategoryAmount(category.amount, category.amount > 0 ? 'negative' : 'positive')}
-            tone={category.tone}
-          />
-        ))}
+        {hasConnectedBank ? (
+          liabilityCategories.map((category) => (
+            <ExpandRow
+              key={category.title}
+              title={category.title}
+              value={formatCategoryAmount(category.amount, category.amount > 0 ? 'negative' : 'positive')}
+              tone={category.tone}
+            />
+          ))
+        ) : (
+          <BankDataPlaceholder />
+        )}
       </ScrollView>
     </View>
   );

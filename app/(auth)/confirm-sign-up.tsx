@@ -1,8 +1,9 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link } from 'expo-router';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useAuth } from '../../src/auth/useAuth';
+import { normalizeEmail } from '../../src/auth/userIdentity';
 import { BrandMark } from '../../src/components/BrandMark';
 import { Colors } from '../../src/theme/colors';
 
@@ -15,8 +16,13 @@ export default function ConfirmSignUpScreen() {
   const [confirmationCode, setConfirmationCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const confirmationCodeInputRef = useRef<TextInput>(null);
 
   async function onConfirm() {
+    if (busy) {
+      return;
+    }
+
     if (!email.trim() || !confirmationCode.trim()) {
       setError('Enter your email and confirmation code.');
       return;
@@ -26,7 +32,7 @@ export default function ConfirmSignUpScreen() {
     setBusy(true);
 
     try {
-      await confirmSignUp({ email, confirmationCode });
+      await confirmSignUp({ email: normalizeEmail(email), confirmationCode });
       router.replace('/(onboarding)');
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Confirmation failed.');
@@ -51,13 +57,18 @@ export default function ConfirmSignUpScreen() {
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
+          returnKeyType="next"
+          onSubmitEditing={() => confirmationCodeInputRef.current?.focus()}
           placeholder="email@domain.com"
           style={styles.input}
         />
         <TextInput
+          ref={confirmationCodeInputRef}
           value={confirmationCode}
           onChangeText={setConfirmationCode}
           keyboardType="number-pad"
+          returnKeyType="go"
+          onSubmitEditing={onConfirm}
           placeholder="Confirmation code"
           style={styles.input}
         />

@@ -1,54 +1,62 @@
 import { useRouter } from 'expo-router';
 import { getCurrentUser } from 'aws-amplify/auth';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/auth/useAuth';
+import { getUserEmailUsername } from '../../src/auth/userIdentity';
+import { CalendarDatePicker, todayDateString } from '../../src/components/CalendarDatePicker';
+import { ProfileAvatar } from '../../src/components/ProfileAvatar';
+import { uploadProfileImage } from '../../src/lib/profileImage';
+import { pickProfileImage } from '../../src/lib/profileImagePicker';
+import { validateEditableProfile } from '../../src/lib/profileValidation';
+import { openPlaidLink } from '../../src/lib/plaidLink';
 import { Colors } from '../../src/theme/colors';
 
-const ageRanges = ['18-24', '25-34', '35-44', '45-54', '55+'] as const;
-const riskLevels = ['Conservative', 'Balanced', 'Aggressive'] as const;
+const TOTAL_STEPS = 3;
 
 export default function OnboardingScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { cancelOnboarding, completeOnboarding } = useAuth();
+  const { cancelOnboarding, completeOnboarding, refreshAppData } = useAuth();
   const [step, setStep] = useState(1);
-  const [firstName, setFirstName] = useState('');
-  const [ageRange, setAgeRange] = useState('');
-  const [monthlyIncome, setMonthlyIncome] = useState('');
-  const [monthlyExpenses, setMonthlyExpenses] = useState('');
-  const [riskTolerance, setRiskTolerance] = useState('');
+  const [name, setName] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [profileImageKey, setProfileImageKey] = useState<string | null>(null);
+  const [originalProfileImageKey, setOriginalProfileImageKey] = useState<string | null>(null);
+  const [localImageUri, setLocalImageUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const phoneNumberInputRef = useRef<TextInput>(null);
 
-  function nextStep() {
-    if (step === 1 && (!firstName.trim() || !ageRange)) {
-      setError('Enter your first name and choose an age range.');
-      return;
-    }
-
-    if (step === 2 && (!monthlyIncome.trim() || !monthlyExpenses.trim())) {
-      setError('Enter your monthly income and expenses.');
+  function nextProfileStep() {
+    const validationError = validateEditableProfile({ name, dateOfBirth, phoneNumber });
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
     setError(null);
-    setStep((current) => Math.min(current + 1, 3));
+    setStep(2);
   }
 
   function resetForm() {
     setStep(1);
-    setFirstName('');
-    setAgeRange('');
-    setMonthlyIncome('');
-    setMonthlyExpenses('');
-    setRiskTolerance('');
+    setName('');
+    setDateOfBirth('');
+    setPhoneNumber('');
+    setProfileImageKey(null);
+    setOriginalProfileImageKey(null);
+    setLocalImageUri(null);
     setError(null);
+    setStatus(null);
   }
 
   async function handleCancelOnboarding() {
-    if (busy) return;
+    if (busy || uploading) return;
 
     resetForm();
     setBusy(true);
@@ -61,9 +69,50 @@ export default function OnboardingScreen() {
     }
   }
 
-  async function submit() {
-    if (!riskTolerance) {
-      setError('Choose your risk tolerance.');
+  async function chooseProfileImage() {
+    if (busy || uploading) return;
+
+    setError(null);
+    setStatus(null);
+
+    let asset;
+    try {
+      asset = await pickProfileImage();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Unable to open your photo library.');
+      return;
+    }
+
+    if (!asset) return;
+
+    setUploading(true);
+    setLocalImageUri(asset.uri);
+
+    try {
+      const upload = await uploadProfileImage({
+        uri: asset.uri,
+        fileName: asset.fileName,
+        mimeType: asset.mimeType,
+        fileSize: asset.fileSize,
+      });
+      setProfileImageKey(upload.profileImageKey);
+      setOriginalProfileImageKey(upload.originalProfileImageKey);
+      setStatus('Image uploaded.');
+    } catch (e: unknown) {
+      setLocalImageUri(null);
+      setError(e instanceof Error ? e.message : 'Unable to upload profile image.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function saveProfileAndContinue() {
+    if (busy || uploading) return;
+
+    const validationError = validateEditableProfile({ name, dateOfBirth, phoneNumber });
+    if (validationError) {
+      setError(validationError);
+      setStep(1);
       return;
     }
 
@@ -72,7 +121,7 @@ export default function OnboardingScreen() {
 
     try {
       const user = await getCurrentUser();
-      const email = user.signInDetails?.loginId ?? user.username;
+      const email = getUserEmailUsername(user);
 
       if (!email) {
         throw new Error('Unable to determine the signed-in user email.');
@@ -80,14 +129,15 @@ export default function OnboardingScreen() {
 
       await completeOnboarding({
         email,
-        firstName: firstName.trim(),
-        ageRange,
-        monthlyIncome: Number(monthlyIncome),
-        monthlyExpenses: Number(monthlyExpenses),
-        riskTolerance,
+        name: name.trim(),
+        dateOfBirth: dateOfBirth.trim(),
+        phoneNumber: phoneNumber.trim(),
+        profileImageKey,
+        originalProfileImageKey,
       });
 
-      router.replace('/(tabs)');
+      setStatus(null);
+      setStep(3);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unable to save your profile.');
     } finally {
@@ -95,91 +145,137 @@ export default function OnboardingScreen() {
     }
   }
 
+  async function connectBank() {
+    if (busy) return;
+
+    setError(null);
+    setBusy(true);
+
+    try {
+      const result = await openPlaidLink({
+        onStatus: setStatus,
+        onExit: () => setStatus(null),
+      });
+
+      if (result === 'exited') {
+        return;
+      }
+
+      await refreshAppData();
+      router.replace('/(tabs)');
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Unable to open Plaid Link.';
+      setError(
+        message.includes('NativeModule') || message.includes('TurboModule')
+          ? 'Plaid Link needs a development build or native app build. It will not run in Expo Go.'
+          : message
+      );
+      setStatus(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function finishWithoutBank() {
+    if (busy) return;
+
+    setError(null);
+    setStatus(null);
+    await refreshAppData();
+    router.replace('/(tabs)');
+  }
+
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 24 }]}>
-      <Pressable style={styles.headerBackButton} onPress={handleCancelOnboarding} disabled={busy}>
+      <Pressable style={styles.headerBackButton} onPress={handleCancelOnboarding} disabled={busy || uploading}>
         <Text style={styles.headerBackButtonText}>←</Text>
       </Pressable>
       <Text style={styles.eyebrow}>Onboarding</Text>
       <Text style={styles.title}>Let&apos;s set up your profile</Text>
-      <Text style={styles.subtitle}>Step {step} of 3</Text>
+      <Text style={styles.subtitle}>Step {step} of {TOTAL_STEPS}</Text>
 
       <View style={styles.card}>
         {step === 1 ? (
           <>
-            <Text style={styles.sectionTitle}>About you</Text>
+            <Text style={styles.sectionTitle}>Profile details</Text>
             <TextInput
-              value={firstName}
-              onChangeText={setFirstName}
-              placeholder="First name"
+              value={name}
+              onChangeText={setName}
+              autoCapitalize="words"
+              returnKeyType="next"
+              placeholder="Name"
               style={styles.input}
             />
-            <View style={styles.choiceRow}>
-              {ageRanges.map((option) => (
-                <Pressable
-                  key={option}
-                  style={[styles.choice, ageRange === option && styles.choiceActive]}
-                  onPress={() => setAgeRange(option)}
-                >
-                  <Text style={[styles.choiceText, ageRange === option && styles.choiceTextActive]}>{option}</Text>
-                </Pressable>
-              ))}
-            </View>
+            <CalendarDatePicker
+              value={dateOfBirth}
+              onChange={setDateOfBirth}
+              placeholder="Date of birth (YYYY-MM-DD)"
+              maximumDate={todayDateString()}
+              style={styles.input}
+            />
+            <TextInput
+              ref={phoneNumberInputRef}
+              value={phoneNumber}
+              onChangeText={setPhoneNumber}
+              keyboardType="phone-pad"
+              returnKeyType="go"
+              onSubmitEditing={nextProfileStep}
+              placeholder="Phone number"
+              style={styles.input}
+            />
           </>
         ) : null}
 
         {step === 2 ? (
           <>
-            <Text style={styles.sectionTitle}>Monthly cash flow</Text>
-            <TextInput
-              value={monthlyIncome}
-              onChangeText={setMonthlyIncome}
-              keyboardType="decimal-pad"
-              placeholder="Monthly income"
-              style={styles.input}
-            />
-            <TextInput
-              value={monthlyExpenses}
-              onChangeText={setMonthlyExpenses}
-              keyboardType="decimal-pad"
-              placeholder="Monthly expenses"
-              style={styles.input}
-            />
+            <Text style={styles.sectionTitle}>Profile image</Text>
+            <ProfileAvatar size={104} profileImageKey={profileImageKey} localUri={localImageUri} style={styles.avatar} />
+            <Pressable style={[styles.primaryBtn, (busy || uploading) && styles.disabled]} onPress={chooseProfileImage} disabled={busy || uploading}>
+              <Text style={styles.primaryBtnText}>{uploading ? 'Uploading...' : 'Upload Image'}</Text>
+            </Pressable>
+            <Pressable style={styles.secondaryBtn} onPress={saveProfileAndContinue} disabled={busy || uploading}>
+              <Text style={styles.secondaryBtnText}>{localImageUri ? 'Continue' : 'Skip'}</Text>
+            </Pressable>
           </>
         ) : null}
 
         {step === 3 ? (
           <>
-            <Text style={styles.sectionTitle}>Risk tolerance</Text>
-            <View style={styles.choiceColumn}>
-              {riskLevels.map((option) => (
-                <Pressable
-                  key={option}
-                  style={[styles.choiceWide, riskTolerance === option && styles.choiceActive]}
-                  onPress={() => setRiskTolerance(option)}
-                >
-                  <Text style={[styles.choiceText, riskTolerance === option && styles.choiceTextActive]}>{option}</Text>
-                </Pressable>
-              ))}
+            <Text style={styles.sectionTitle}>Connect your bank</Text>
+            <View style={styles.plaidBox}>
+              <Text style={styles.plaidLogo}>F</Text>
+              <Text style={styles.plaidTitle}>Plaid Link</Text>
+              <Text style={styles.plaidCopy}>
+                Securely connect a bank account so Fluxa can start syncing balances, accounts, and transactions.
+              </Text>
             </View>
           </>
         ) : null}
 
+        {status ? <Text style={styles.success}>{status}</Text> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        <View style={styles.actions}>
-          {step > 1 ? (
-            <Pressable style={styles.secondaryBtn} onPress={() => setStep((current) => current - 1)}>
-              <Text style={styles.secondaryBtnText}>Back</Text>
-            </Pressable>
-          ) : null}
+        {step !== 2 ? (
+          <View style={styles.actions}>
+            {step > 1 && step < 3 ? (
+              <Pressable style={styles.secondaryBtn} onPress={() => setStep((current) => current - 1)}>
+                <Text style={styles.secondaryBtnText}>Back</Text>
+              </Pressable>
+            ) : null}
 
-          <Pressable style={styles.primaryBtn} onPress={step === 3 ? submit : nextStep} disabled={busy}>
-            <Text style={styles.primaryBtnText}>
-              {busy ? 'Saving...' : step === 3 ? 'Finish' : 'Continue'}
-            </Text>
+            <Pressable style={styles.primaryBtn} onPress={step === 3 ? connectBank : nextProfileStep} disabled={busy || uploading}>
+              <Text style={styles.primaryBtnText}>
+                {busy ? 'Working...' : step === 3 ? 'Connect bank' : 'Continue'}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {step === 3 ? (
+          <Pressable style={styles.notNowDialog} onPress={finishWithoutBank} disabled={busy}>
+            <Text style={styles.notNowText}>Not now</Text>
           </Pressable>
-        </View>
+        ) : null}
       </View>
     </View>
   );
@@ -221,25 +317,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: '#fff',
   },
-  choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  choiceColumn: { gap: 10 },
-  choice: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  choiceWide: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-  },
-  choiceActive: { borderColor: Colors.blue, backgroundColor: '#eef5ff' },
-  choiceText: { color: '#111', fontWeight: '500' },
-  choiceTextActive: { color: Colors.blue, fontWeight: '700' },
+  avatar: { alignSelf: 'center' },
   actions: { flexDirection: 'row', gap: 12, marginTop: 8 },
   secondaryBtn: {
     flex: 1,
@@ -248,6 +326,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
+    backgroundColor: '#fff',
   },
   secondaryBtnText: { color: '#111', fontWeight: '600' },
   primaryBtn: {
@@ -258,5 +337,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   primaryBtnText: { color: '#fff', fontWeight: '600' },
+  disabled: { opacity: 0.6 },
+  plaidBox: {
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 14,
+    backgroundColor: '#F8FAFC',
+    alignItems: 'center',
+    padding: 18,
+  },
+  plaidLogo: { fontSize: 42, fontWeight: '900', color: Colors.blue },
+  plaidTitle: { marginTop: 6, fontSize: 20, fontWeight: '900', color: '#111827' },
+  plaidCopy: { marginTop: 8, color: Colors.muted, textAlign: 'center', lineHeight: 20 },
+  notNowDialog: {
+    marginTop: 2,
+    minHeight: 44,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+  },
+  notNowText: { color: Colors.muted, fontWeight: '800' },
+  success: { color: Colors.green, fontWeight: '700' },
   error: { color: Colors.red },
 });
